@@ -21,6 +21,9 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
   const [startedAt, setStartedAt] = useState(0)
   const [now, setNow] = useState(0)
   const [results, setResults] = useState<ImportResult[] | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const [stopped, setStopped] = useState(false)
+  const finished = !!results && !running
   const stop = useRef(false)
 
   const rescan = () => {
@@ -40,7 +43,8 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
     setDone(0)
     setResults(null)
     setStep('')
-    setStartedAt(Date.now())
+    const t0 = Date.now()
+    setStartedAt(t0)
     const tick = window.setInterval(() => setNow(Date.now()), 1000)
     const rs = await importFiles(
       lib,
@@ -50,10 +54,11 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
       (name, msg) => setStep(`${name}: ${msg}…`),
       () => stop.current,
     ).finally(() => window.clearInterval(tick))
+    setElapsed(Date.now() - t0)
+    setStopped(stop.current && rs.length < scan.files.length)
     setResults(rs)
     setRunning(false)
     onImported([...new Set(rs.flatMap((r) => (r.status === 'imported' ? [r.date] : [])))])
-    rescan()
   }
 
   const imported = results?.filter((r) => r.status === 'imported') ?? []
@@ -74,16 +79,18 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
           )}
         </div>
 
+        {!finished && (
         <p className="small-text">
           保存フォルダ「{lib.rootName}」の中の <code>{INBOX}</code> フォルダに写真を入れてから、「取り込む」を押してください。
           撮影日ごとのフォルダに原本を保存し、縮小版(長辺 {settings.reducedLongEdge}px)とサムネイルを作ります。
           {settings.removeFromInbox ? '取り込めた写真は、内容を確認してから取り込み用フォルダから消します。' : '取り込み用フォルダの写真はそのまま残します。'}
         </p>
+        )}
 
         {error && <p className="error">{error}</p>}
 
         {scanning && !scan && <p className="muted">取り込み用フォルダを確認しています…(NAS の場合は少し時間がかかります)</p>}
-        {scan && (
+        {scan && !finished && (
           <div className="import-status">
             <p>
               取り込み用フォルダの写真: <strong>{scan.files.length}</strong> 枚
@@ -115,11 +122,37 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
           </div>
         )}
 
-        {results && (
-          <div className="import-result">
-            <p>
-              取り込み: <strong>{imported.length}</strong> 枚 / 取り込み済みのため飛ばした写真: {dups.length} 枚 / 失敗: {errors.length} 枚
+        {finished && (
+          <div className={`done-box ${errors.length ? 'has-error' : ''}`} role="status">
+            <p className="done-title">
+              {stopped ? '⏸ 取り込みを中止しました' : errors.length ? '⚠ 取り込みが終わりました(一部失敗あり)' : '✅ 取り込みが終わりました'}
             </p>
+            <p className="small-text">
+              {imported.length} 枚を取り込みました(かかった時間: {fmtElapsed(elapsed)})
+              {stopped && '。残りの写真は取り込み用フォルダにそのまま残っています'}
+            </p>
+          </div>
+        )}
+
+        {finished && (
+          <div className="import-result">
+            <h3>結果</h3>
+            <table className="result-table">
+              <tbody>
+                <tr>
+                  <th>取り込んだ写真</th>
+                  <td>{imported.length} 枚</td>
+                </tr>
+                <tr>
+                  <th>取り込み済みのため飛ばした写真</th>
+                  <td>{dups.length} 枚</td>
+                </tr>
+                <tr className={errors.length ? 'error' : ''}>
+                  <th>失敗した写真</th>
+                  <td>{errors.length} 枚</td>
+                </tr>
+              </tbody>
+            </table>
             {dates.length > 0 && (
               <p className="small-text">
                 取り込んだ日:{' '}
@@ -153,9 +186,16 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
         )}
 
         <div className="modal-foot">
-          <button onClick={() => void start()} disabled={running || !scan?.files.length}>
-            {running ? '取り込み中…' : scanning ? '確認中…' : '取り込む'}
-          </button>
+          {finished ? (
+            <>
+              <span className="muted small-text foot-note">写真を追加で入れたときは、閉じてからもう一度「取り込み」を開いてください</span>
+              <button onClick={onClose}>閉じる</button>
+            </>
+          ) : (
+            <button onClick={() => void start()} disabled={running || scanning || !scan?.files.length}>
+              {running ? '取り込み中…' : scanning ? '確認中…' : '取り込む'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -168,4 +208,9 @@ function remaining(done: number, total: number, startedAt: number, now: number):
   const sec = Math.round((((now - startedAt) / done) * (total - done)) / 1000)
   if (sec <= 0) return ''
   return `(残り 約${sec >= 60 ? `${Math.ceil(sec / 60)}分` : `${sec}秒`})`
+}
+
+function fmtElapsed(ms: number): string {
+  const sec = Math.max(1, Math.round(ms / 1000))
+  return sec >= 60 ? `${Math.floor(sec / 60)}分${sec % 60}秒` : `${sec}秒`
 }

@@ -216,3 +216,13 @@ textarea {
 .cal-list { list-style: none; margin: 4px 0 8px; padding: 0; }
 .thumb-empty { background: var(--other); }
 .step-line { flex-basis: 100%; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.done-box { margin: 12px 0 4px; padding: 12px 14px; border-radius: 8px; background: var(--ok-bg); border: 1px solid var(--ok-border); }
+.done-box.has-error { background: var(--warn-bg); border-color: var(--warn-border); }
+.done-box p { margin: 0; }
+.done-title { font-size: 18px; font-weight: bold; margin-bottom: 4px !important; }
+.import-result h3 { font-size: 15px; margin: 10px 0 6px; }
+.result-table { border-collapse: collapse; margin-bottom: 8px; }
+.result-table th { text-align: left; font-weight: normal; padding: 2px 16px 2px 0; }
+.result-table td { text-align: right; font-weight: bold; }
+.modal-foot { align-items: center; gap: 12px; }
+.foot-note { margin-right: auto; }
