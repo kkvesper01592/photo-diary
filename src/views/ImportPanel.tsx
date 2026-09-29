@@ -16,14 +16,20 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
   const [error, setError] = useState('')
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(0)
+  const [scanning, setScanning] = useState(false)
+  const [step, setStep] = useState('')
+  const [startedAt, setStartedAt] = useState(0)
+  const [now, setNow] = useState(0)
   const [results, setResults] = useState<ImportResult[] | null>(null)
   const stop = useRef(false)
 
   const rescan = () => {
     setError('')
+    setScanning(true)
     scanInbox(lib)
       .then(setScan)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setScanning(false))
   }
   useEffect(rescan, [lib])
 
@@ -33,7 +39,17 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
     setRunning(true)
     setDone(0)
     setResults(null)
-    const rs = await importFiles(lib, settings, scan.files, (n) => setDone(n), () => stop.current)
+    setStep('')
+    setStartedAt(Date.now())
+    const tick = window.setInterval(() => setNow(Date.now()), 1000)
+    const rs = await importFiles(
+      lib,
+      settings,
+      scan.files,
+      (n) => setDone(n),
+      (name, msg) => setStep(`${name}: ${msg}…`),
+      () => stop.current,
+    ).finally(() => window.clearInterval(tick))
     setResults(rs)
     setRunning(false)
     onImported([...new Set(rs.flatMap((r) => (r.status === 'imported' ? [r.date] : [])))])
@@ -66,6 +82,7 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
 
         {error && <p className="error">{error}</p>}
 
+        {scanning && !scan && <p className="muted">取り込み用フォルダを確認しています…(NAS の場合は少し時間がかかります)</p>}
         {scan && (
           <div className="import-status">
             <p>
@@ -89,8 +106,9 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
           <div className="progress-wrap">
             <progress max={scan?.files.length ?? 1} value={done} />
             <span className="small-text">
-              {done} / {scan?.files.length} 枚
+              {done} / {scan?.files.length} 枚{remaining(done, scan?.files.length ?? 0, startedAt, now)}
             </span>
+            <p className="small-text muted step-line">{step || '準備中…'}</p>
             <button className="small ghost" onClick={() => (stop.current = true)}>
               中止(今の1枚が終わったら止めます)
             </button>
@@ -136,10 +154,18 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
 
         <div className="modal-foot">
           <button onClick={() => void start()} disabled={running || !scan?.files.length}>
-            {running ? '取り込み中…' : '取り込む'}
+            {running ? '取り込み中…' : scanning ? '確認中…' : '取り込む'}
           </button>
         </div>
       </div>
     </div>
   )
+}
+
+/** 残り時間の目安(2枚目以降) */
+function remaining(done: number, total: number, startedAt: number, now: number): string {
+  if (done < 1 || now <= startedAt) return ''
+  const sec = Math.round((((now - startedAt) / done) * (total - done)) / 1000)
+  if (sec <= 0) return ''
+  return `(残り 約${sec >= 60 ? `${Math.ceil(sec / 60)}分` : `${sec}秒`})`
 }

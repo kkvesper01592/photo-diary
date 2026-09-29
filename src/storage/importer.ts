@@ -51,7 +51,8 @@ async function uniqueName(dir: FileSystemDirectoryHandle, used: Set<string>, nam
 }
 
 /** 1枚取り込む: 原本を日付フォルダへコピー → 読み戻して確認 → 縮小版・サムネイル → 日記.json に追加 → 取り込み用フォルダから消す */
-async function importOne(lib: Library, settings: Settings, f: InboxFile): Promise<ImportResult> {
+async function importOne(lib: Library, settings: Settings, f: InboxFile, step: (msg: string) => void): Promise<ImportResult> {
+  step('写真を読み込み中')
   const file = await f.handle.getFile()
   const hash = await sha256(file)
   const meta = await readMeta(file)
@@ -61,15 +62,19 @@ async function importOne(lib: Library, settings: Settings, f: InboxFile): Promis
   const day = await lib.loadDay(date)
   if (day.photos.some((p) => p.hash === hash)) return { name: f.name, status: 'duplicate', date }
 
+  step('縮小版・サムネイルを作成中')
   const resized = await makeResized(file, settings.reducedLongEdge, THUMB_LONG_EDGE)
 
   const dir = (await lib.dayDir(date, true))!
   const name = await uniqueName(dir, new Set(day.photos.map((p) => p.file.toLowerCase())), safeName(f.name))
+  step('原本を保存中')
   await writeBlob(dir, name, file)
+  step('保存した原本を確認中')
   // 原本は取り込み用フォルダから消すことがあるので、中身まで一致するか確かめる
   const copied = await getFile(dir, name)
   if (!copied || (await sha256(copied)) !== hash) throw new Error('コピーした原本の内容が一致しません')
 
+  step('縮小版・サムネイルを保存中')
   await writeBlob((await getDir(dir, [REDUCED_DIR], true))!, derivedName(name), resized.reduced)
   await writeBlob((await getDir(dir, [THUMB_DIR], true))!, derivedName(name), resized.thumb)
 
@@ -105,6 +110,7 @@ export async function importFiles(
   settings: Settings,
   files: InboxFile[],
   onProgress: (done: number, r: ImportResult) => void,
+  onStep: (name: string, msg: string) => void,
   shouldStop: () => boolean,
 ): Promise<ImportResult[]> {
   const results: ImportResult[] = []
@@ -112,7 +118,7 @@ export async function importFiles(
     if (shouldStop()) break
     let r: ImportResult
     try {
-      r = await importOne(lib, settings, f)
+      r = await importOne(lib, settings, f, (msg) => onStep(f.name, msg))
     } catch (e) {
       r = { name: f.name, status: 'error', message: e instanceof Error ? e.message : String(e) }
     }

@@ -215,3 +215,4 @@ textarea {
 .opt { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; margin: 4px 0; }
 .cal-list { list-style: none; margin: 4px 0 8px; padding: 0; }
 .thumb-empty { background: var(--other); }
+.step-line { flex-basis: 100%; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
