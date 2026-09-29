@@ -77,7 +77,7 @@ export default function App() {
         <>
           <p>写真とメモを保存するフォルダを選んでください。</p>
           <p className="muted small-text">
-            NAS(lan_01)の上のフォルダがおすすめです。複数の PC から同じフォルダを選べば、どの PC でも同じ写真・メモを見られます。
+            NAS の上のフォルダがおすすめです。複数の PC から同じフォルダを選べば、どの PC でも同じ写真・メモを見られます。
             後から設定で変更できます。
           </p>
           <button onClick={() => void choose()}>保存フォルダを選ぶ</button>
