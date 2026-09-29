@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.local
+*.tsbuildinfo
+
+# ローカル専用の設定
+.claude/
+
+# 写真・日記のデータは絶対にリポジトリへ入れない
+_取り込み/
+写真日記_設定.json
+*.zip
