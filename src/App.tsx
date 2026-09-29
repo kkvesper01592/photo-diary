@@ -198,7 +198,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
         </div>
         <div className="menu">
           <button className="small" onClick={() => setModal('import')}>
-            取り込み{inboxCount > 0 && <span className="badge">{inboxCount}</span>}
+            取り込み{inboxCount > 0 && <span className="badge" title={`取り込み用フォルダに写真が ${inboxCount} 枚あります`}>{inboxCount}</span>}
           </button>
           {!google.token && (
             <button className="small ghost" onClick={() => void google.login()} title="予定を表示するため(読み取りのみ)">

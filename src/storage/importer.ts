@@ -32,7 +32,7 @@ export async function scanInbox(lib: Library): Promise<InboxScan> {
 
 export type ImportResult =
   | { name: string; status: 'imported'; date: string; file: string; noDate: boolean }
-  | { name: string; status: 'duplicate'; date: string }
+  | { name: string; status: 'duplicate'; date: string; moved: boolean }
   | { name: string; status: 'error'; message: string }
 
 function safeName(name: string) {
@@ -60,7 +60,10 @@ async function importOne(lib: Library, settings: Settings, f: InboxFile, step: (
   const date = ymd(taken)
 
   const day = await lib.loadDay(date)
-  if (day.photos.some((p) => p.hash === hash)) return { name: f.name, status: 'duplicate', date }
+  if (day.photos.some((p) => p.hash === hash)) {
+    const moved = settings.removeFromInbox && (await moveToDupFolder(lib, f, file, hash))
+    return { name: f.name, status: 'duplicate', date, moved }
+  }
 
   step('縮小版・サムネイルを作成中')
   const resized = await makeResized(file, settings.reducedLongEdge, THUMB_LONG_EDGE)
@@ -103,6 +106,24 @@ async function importOne(lib: Library, settings: Settings, f: InboxFile, step: (
     await inbox.removeEntry(f.name)
   }
   return { name: f.name, status: 'imported', date, file: name, noDate: !meta.takenAt }
+}
+
+export const DUP_DIR = '取り込み済みの写真(重複)'
+
+/** 取り込み済みと同じ写真を、取り込み用フォルダの中の別フォルダへ移す(消さずに残す。移せなければそのまま) */
+async function moveToDupFolder(lib: Library, f: InboxFile, file: File, hash: string): Promise<boolean> {
+  try {
+    const inbox = await lib.ensureInbox()
+    const dup = (await getDir(inbox, [DUP_DIR], true))!
+    const name = await uniqueName(dup, new Set(), f.name)
+    await writeBlob(dup, name, file)
+    const copied = await getFile(dup, name)
+    if (!copied || (await sha256(copied)) !== hash) return false
+    await inbox.removeEntry(f.name)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function importFiles(

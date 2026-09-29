@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { importFiles, scanInbox, type ImportResult, type InboxScan } from '../storage/importer'
+import { DUP_DIR, importFiles, scanInbox, type ImportResult, type InboxScan } from '../storage/importer'
 import type { Library } from '../storage/library'
 import { INBOX, type Settings } from '../storage/model'
 
@@ -168,11 +168,19 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
                 撮影日時の記録が無い写真が {noDate.length} 枚あり、ファイルの日時の日付に入れました: {noDate.map((r) => r.name).join('、')}
               </p>
             )}
-            {dups.length > 0 && (
+            {dups.some((r) => r.status === 'duplicate' && r.moved) && (
               <p className="small-text muted">
-                取り込み済みと同じ写真は、取り込み用フォルダにそのまま残しています(不要なら手で消してください): {dups.map((r) => r.name).join('、')}
+                取り込み済みと同じ写真は、取り込み用フォルダの中の「{DUP_DIR}」フォルダへ移しました(確認して不要なら手で消してください):{' '}
+                {dups.filter((r) => r.status === 'duplicate' && r.moved).map((r) => r.name).join('、')}
               </p>
             )}
+            {dups.some((r) => r.status === 'duplicate' && !r.moved) && (
+              <p className="small-text muted">
+                取り込み済みと同じ写真は、取り込み用フォルダにそのまま残しています(不要なら手で消してください):{' '}
+                {dups.filter((r) => r.status === 'duplicate' && !r.moved).map((r) => r.name).join('、')}
+              </p>
+            )}
+            {errors.length > 0 && <p className="small-text muted">失敗した写真は取り込み用フォルダに残っています。もう一度「取り込み」を開くと再度取り込めます。</p>}
             {errors.length > 0 && (
               <ul className="error small-text">
                 {errors.map((r) => (
