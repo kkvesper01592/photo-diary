@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { monthGrid, ymd } from './lib/dates'
+import { useNewerVersion, versionDetail, versionLabel } from './lib/version'
 import { eventsOnDay, isLinked } from './lib/events'
 import { useGoogle, useRangeEvents } from './google/useGoogle'
 import { canPickFolder, loadSavedRoot, permissionOf, pickRoot, requestPermission, saveRoot } from './storage/fs'
@@ -71,6 +72,7 @@ export default function App() {
   return (
     <div className="gate">
       <h1>📷 写真日記</h1>
+      <p className="muted small-text">{versionDetail}</p>
       {gate.kind === 'loading' && <p className="muted">読み込み中…</p>}
       {gate.kind === 'unsupported' && <p className="error">このブラウザでは使えません。PC の Microsoft Edge または Google Chrome で開いてください。</p>}
       {gate.kind === 'nofolder' && (
@@ -113,6 +115,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
   const [viewer, setViewer] = useState<{ day: DayData; file: string; files: string[] } | null>(null)
 
   const google = useGoogle()
+  const newer = useNewerVersion()
   const grid = monthGrid(cursor.y, cursor.m)
   const range = useRangeEvents(google.token, google.calendars, settings.hiddenCalendarIds, grid.start, grid.end, google.onAuthError)
 
@@ -208,8 +211,20 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
           <button className="small ghost" onClick={() => setModal('settings')}>
             設定
           </button>
+          <button className="version-tag" title={`${versionDetail}(押すと設定で詳しく表示)`} onClick={() => setModal('settings')}>
+            {versionLabel}
+          </button>
         </div>
       </header>
+
+      {newer && (
+        <div className="banner">
+          新しいヴァージョン(ver {newer.version}・{newer.built}・ビルド {newer.commit})が公開されています。
+          <button className="small" onClick={() => window.location.reload()}>
+            再読み込みして更新
+          </button>
+        </div>
+      )}
 
       {error && <div className="banner warn-banner">{error}</div>}
       {google.error && <div className="banner warn-banner">{google.error}</div>}

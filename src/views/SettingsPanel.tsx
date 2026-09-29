@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CalendarListEntry } from '../google/calendarApi'
 import type { Library } from '../storage/library'
 import type { Settings } from '../storage/model'
+import { versionDetail } from '../lib/version'
 
 interface Props {
   lib: Library
@@ -146,7 +147,7 @@ export default function SettingsPanel(p: Props) {
 
         {error && <p className="error">{error}</p>}
         <p className="muted small-text">
-          写真日記 ver {__BUILD_INFO__.version}({__BUILD_INFO__.commit})
+          写真日記 {versionDetail}
         </p>
       </div>
     </div>

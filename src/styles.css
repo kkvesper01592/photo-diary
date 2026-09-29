@@ -226,3 +226,5 @@ textarea {
 .result-table td { text-align: right; font-weight: bold; }
 .modal-foot { align-items: center; gap: 12px; }
 .foot-note { margin-right: auto; }
+.version-tag { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 2px 8px; border-radius: 999px; cursor: pointer; white-space: nowrap; align-self: center; }
+.version-tag:hover { color: inherit; }
