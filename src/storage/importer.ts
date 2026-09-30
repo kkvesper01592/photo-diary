@@ -60,7 +60,9 @@ async function importOne(lib: Library, settings: Settings, f: InboxFile, step: (
   const date = ymd(taken)
 
   const day = await lib.loadDay(date)
-  if (day.photos.some((p) => p.hash === hash)) {
+  // 取り込み済みとみなすのは「同じ日に、同じファイル名で、中身も完全に同じ写真」があるときだけ
+  // (ファイルのコピーで同じ名前のファイルがあるときと同じ考え方。名前が同じでも中身が違えば、名前を変えて取り込む)
+  if (isAlreadyImported(day.photos, f.name, hash)) {
     const moved = settings.removeFromInbox && (await moveToDupFolder(lib, f, file, hash))
     return { name: f.name, status: 'duplicate', date, moved }
   }
@@ -95,7 +97,7 @@ async function importOne(lib: Library, settings: Settings, f: InboxFile, step: (
     importedAt: new Date().toISOString(),
   }
   await lib.updateDay(date, (d) => {
-    if (d.photos.some((p) => p.hash === hash)) return false
+    if (isAlreadyImported(d.photos, f.name, hash) || d.photos.some((p) => p.file === name)) return false
     d.photos.push(entry)
     d.photos.sort((a, b) => a.takenAt.localeCompare(b.takenAt))
   })
@@ -106,6 +108,13 @@ async function importOne(lib: Library, settings: Settings, f: InboxFile, step: (
     await inbox.removeEntry(f.name)
   }
   return { name: f.name, status: 'imported', date, file: name, noDate: !meta.takenAt }
+}
+
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+/** 同じファイル名(取り込み前の名前)で、中身も完全に同じ写真が登録済みか */
+export function isAlreadyImported(photos: PhotoEntry[], name: string, hash: string): boolean {
+  return photos.some((p) => p.hash === hash && (sameName(p.originalName, name) || sameName(p.file, name)))
 }
 
 export const DUP_DIR = '取り込み済みの写真(重複)'

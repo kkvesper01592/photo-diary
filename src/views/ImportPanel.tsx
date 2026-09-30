@@ -144,7 +144,7 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
                   <td>{imported.length} 枚</td>
                 </tr>
                 <tr>
-                  <th>取り込み済みのため飛ばした写真</th>
+                  <th>取り込み済み(同じ名前・同じ中身)のため飛ばした写真</th>
                   <td>{dups.length} 枚</td>
                 </tr>
                 <tr className={errors.length ? 'error' : ''}>
@@ -170,13 +170,13 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
             )}
             {dups.some((r) => r.status === 'duplicate' && r.moved) && (
               <p className="small-text muted">
-                取り込み済みと同じ写真は、取り込み用フォルダの中の「{DUP_DIR}」フォルダへ移しました(確認して不要なら手で消してください):{' '}
+                同じ名前・同じ中身の写真が取り込み済みだった写真は、取り込み用フォルダの中の「{DUP_DIR}」フォルダへ移しました(確認して不要なら手で消してください):{' '}
                 {dups.filter((r) => r.status === 'duplicate' && r.moved).map((r) => r.name).join('、')}
               </p>
             )}
             {dups.some((r) => r.status === 'duplicate' && !r.moved) && (
               <p className="small-text muted">
-                取り込み済みと同じ写真は、取り込み用フォルダにそのまま残しています(不要なら手で消してください):{' '}
+                同じ名前・同じ中身の写真が取り込み済みだった写真は、取り込み用フォルダにそのまま残しています(不要なら手で消してください):{' '}
                 {dups.filter((r) => r.status === 'duplicate' && !r.moved).map((r) => r.name).join('、')}
               </p>
             )}
