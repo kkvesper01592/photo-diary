@@ -25,6 +25,12 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
   const [saveError, setSaveError] = useState('')
   const [conflict, setConflict] = useState<DayData | null>(null)
   const [filterKey, setFilterKey] = useState<string>()
+  // 選んで削除
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [confirmDel, setConfirmDel] = useState(false)
+  const [delProgress, setDelProgress] = useState<{ done: number; total: number } | null>(null)
+  const [delError, setDelError] = useState('')
 
   // 保存待ちのメモ(日付を切り替えたときにも保存するため ref で持つ)
   const pending = useRef<{ date: string; base: string; memo: string } | null>(null)
@@ -81,6 +87,10 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
   // 日付を切り替えたら表示をリセットし、切り替え前の日のメモを保存する
   useEffect(() => {
     setFilterKey(undefined)
+    setSelecting(false)
+    setPicked(new Set())
+    setConfirmDel(false)
+    setDelError('')
     setSave('')
     setSaveError('')
     setConflict(null)
@@ -132,6 +142,44 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
   const hol = holidayName(d.getFullYear(), d.getMonth() + 1, d.getDate())
   const filterEvent = dayEvents.find((e) => e.key === filterKey)
   const shown = filterEvent ? day.photos.filter((p) => isLinked(p, filterEvent, dayEvents)) : day.photos
+  const pickedList = day.photos.filter((p) => picked.has(p.file))
+
+  const togglePick = (file: string) =>
+    setPicked((cur) => {
+      const next = new Set(cur)
+      if (next.has(file)) next.delete(file)
+      else next.add(file)
+      return next
+    })
+
+  const endSelecting = () => {
+    setSelecting(false)
+    setPicked(new Set())
+    setConfirmDel(false)
+  }
+
+  const deletePicked = async () => {
+    const files = pickedList.map((p) => p.file)
+    setDelError('')
+    setDelProgress({ done: 0, total: files.length })
+    const failed: string[] = []
+    let latest = day
+    for (const [n, f] of files.entries()) {
+      try {
+        latest = await lib.deletePhoto(date, f)
+      } catch (e) {
+        failed.push(`${f}(${e instanceof Error ? e.message : e})`)
+      }
+      setDelProgress({ done: n + 1, total: files.length })
+    }
+    setDay(latest)
+    setDelProgress(null)
+    setConfirmDel(false)
+    setPicked(new Set(failed.length ? files.filter((f) => latest.photos.some((p) => p.file === f)) : []))
+    if (failed.length) setDelError(`削除できなかった写真があります: ${failed.join('、')}`)
+    else setSelecting(false)
+    onSaved()
+  }
 
   return (
     <aside className="day-panel">
@@ -216,7 +264,36 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
               すべて表示
             </button>
           )}
+          {shown.length > 0 && !selecting && (
+            <button className="small ghost push-right" onClick={() => setSelecting(true)} title="写真を選んで削除します">
+              選んで削除
+            </button>
+          )}
         </h3>
+        {selecting && (
+          <div className="select-bar">
+            <span className="small-text">
+              {picked.size ? `${picked.size} 枚を選択中` : '削除する写真をクリックして選んでください'}
+            </span>
+            <button className="link small-text" onClick={() => setPicked(new Set(shown.map((p) => p.file)))}>
+              表示中をすべて選択
+            </button>
+            {picked.size > 0 && (
+              <button className="link small-text" onClick={() => setPicked(new Set())}>
+                選択を解除
+              </button>
+            )}
+            <span className="push-right btns">
+              <button className="small ghost" onClick={endSelecting}>
+                やめる
+              </button>
+              <button className="small danger" disabled={!picked.size} onClick={() => setConfirmDel(true)}>
+                選んだ {picked.size} 枚を削除
+              </button>
+            </span>
+          </div>
+        )}
+        {delError && <p className="error small-text">{delError}</p>}
         {shown.length === 0 ? (
           <p className="muted small-text">
             {filterEvent ? 'この予定に紐づく写真はありません(写真を開くと手動で紐づけできます)' : '写真はありません'}
@@ -224,8 +301,16 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
         ) : (
           <div className="photo-grid">
             {shown.map((p) => (
-              <button key={p.file} type="button" className="photo-tile" onClick={() => onOpenPhoto(day, p.file, filterKey)} title={p.caption || p.file}>
+              <button
+                key={p.file}
+                type="button"
+                className={`photo-tile ${selecting ? 'selecting' : ''} ${picked.has(p.file) ? 'picked' : ''}`}
+                onClick={() => (selecting ? togglePick(p.file) : onOpenPhoto(day, p.file, filterKey))}
+                title={p.caption || p.file}
+                aria-pressed={selecting ? picked.has(p.file) : undefined}
+              >
                 <Thumb lib={lib} date={date} file={p.file} alt={p.caption} />
+                {selecting && <span className="tile-check">{picked.has(p.file) ? '✓' : ''}</span>}
                 <span className="tile-time">
                   {p.dateSource === 'exif' ? p.takenAt.slice(11, 16) : '時刻不明'}
                   {p.gps && ' 📍'}
@@ -236,6 +321,42 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
           </div>
         )}
       </section>
+
+      {confirmDel && (
+        <div className="modal-back confirm-back" onClick={() => !delProgress && setConfirmDel(false)}>
+          <div className="modal confirm" role="alertdialog" aria-modal="true" aria-label="写真の削除" onClick={(e) => e.stopPropagation()}>
+            <h2>選んだ {pickedList.length} 枚の写真を完全に削除しますか？</h2>
+            <p className="small-text">{jpDate(d)}</p>
+            <ul className="del-list small-text">
+              {pickedList.map((p) => (
+                <li key={p.file}>
+                  {p.file}
+                  {p.dateSource === 'exif' && `(${p.takenAt.slice(11, 16)})`}
+                  {p.caption && ` 「${p.caption}」`}
+                </li>
+              ))}
+            </ul>
+            <p className="error">
+              保存フォルダから、原本・縮小版・サムネイルのファイルと、説明・予定との紐づけを削除します。
+              <br />
+              ごみ箱には入らず、<strong>元に戻すことはできません。</strong>
+            </p>
+            {delProgress && (
+              <p className="small-text">
+                削除中… {delProgress.done} / {delProgress.total} 枚
+              </p>
+            )}
+            <div className="modal-foot">
+              <button className="ghost" onClick={() => setConfirmDel(false)} disabled={!!delProgress} autoFocus>
+                やめる
+              </button>
+              <button className="danger" onClick={() => void deletePicked()} disabled={!!delProgress}>
+                {delProgress ? '削除中…' : `${pickedList.length} 枚を完全に削除する`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }
