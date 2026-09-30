@@ -64,9 +64,10 @@ export interface Settings {
   hiddenCalendarIds: string[] // 表示しないカレンダー(既定は全部表示。新しく作ったカレンダーも表示される)
   reducedLongEdge: number // 縮小版の長辺(px)
   removeFromInbox: boolean // 取り込み後、取り込み用フォルダから元のファイルを消す
+  skipDuplicates: boolean // 同じ日・同じファイル名・同じ中身の写真が取り込み済みなら取り込まない
 }
 
-export const DEFAULT_SETTINGS: Settings = { version: 1, hiddenCalendarIds: [], reducedLongEdge: 1920, removeFromInbox: true }
+export const DEFAULT_SETTINGS: Settings = { version: 1, hiddenCalendarIds: [], reducedLongEdge: 1920, removeFromInbox: true, skipDuplicates: true }
 
 export const THUMB_LONG_EDGE = 480
 

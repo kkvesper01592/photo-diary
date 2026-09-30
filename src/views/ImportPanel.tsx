@@ -84,6 +84,7 @@ export default function ImportPanel({ lib, settings, onClose, onImported, onJump
           保存フォルダ「{lib.rootName}」の中の <code>{INBOX}</code> フォルダに写真を入れてから、「取り込む」を押してください。
           撮影日ごとのフォルダに原本を保存し、縮小版(長辺 {settings.reducedLongEdge}px)とサムネイルを作ります。
           {settings.removeFromInbox ? '取り込めた写真は、内容を確認してから取り込み用フォルダから消します。' : '取り込み用フォルダの写真はそのまま残します。'}
+          {settings.skipDuplicates ? '' : '(重複の確認はオフです。すべての写真を取り込みます)'}
         </p>
         )}
 

@@ -95,6 +95,13 @@ export default function SettingsPanel(p: Props) {
             <input type="checkbox" checked={settings.removeFromInbox} onChange={(e) => void change({ removeFromInbox: e.target.checked })} />
             取り込めた写真は、取り込み用フォルダから消す(原本のコピーを確認してから消します)
           </label>
+          <label className="opt">
+            <input type="checkbox" checked={settings.skipDuplicates} onChange={(e) => void change({ skipDuplicates: e.target.checked })} />
+            重複の確認をする(同じ撮影日に、同じファイル名・同じ中身の写真が取り込み済みなら取り込まない)
+          </label>
+          <p className="muted small-text">
+            オフにすると、取り込み用フォルダの写真をすべて取り込みます(同じ名前の写真があれば、名前に _2 などを付けて保存します)。
+          </p>
         </section>
 
         <section className="set-sec">
