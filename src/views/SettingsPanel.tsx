@@ -24,6 +24,40 @@ export default function SettingsPanel(p: Props) {
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // 写真をすべて削除
+  const [delAll, setDelAll] = useState<{ photos: number; days: number } | null>(null)
+  const [delMemos, setDelMemos] = useState(false)
+  const [backedUp, setBackedUp] = useState(false)
+  const [delProgress, setDelProgress] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  const openDelAll = async () => {
+    setError('')
+    setMsg('')
+    try {
+      setDelMemos(false)
+      setBackedUp(false)
+      setDelProgress('')
+      setDelAll(await lib.countAll())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const runDelAll = async () => {
+    setDeleting(true)
+    setError('')
+    try {
+      const n = await lib.deleteAllPhotos(delMemos, (date, done) => setDelProgress(`削除中… ${done} 枚目(${date})`))
+      setDelAll(null)
+      setMsg(`写真 ${n} 枚を削除しました${delMemos ? '(メモも削除しました)' : '(メモは残しています)'}`)
+      p.onRebuilt()
+    } catch (e) {
+      setError(`削除の途中で止まりました: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const change = async (s: Partial<Settings>) => {
     setError('')
@@ -152,7 +186,50 @@ export default function SettingsPanel(p: Props) {
           {msg && <p className="small-text">{msg}</p>}
         </section>
 
+        <section className="set-sec">
+          <h3>写真をすべて削除</h3>
+          <p className="muted small-text">
+            写真を整理し直して取り込み直したいときに使います。登録されているすべての写真(原本・縮小版・サムネイル)を保存フォルダから完全に削除します。
+            保存フォルダの中の、このアプリが作っていないフォルダ・ファイルや、取り込み用フォルダの中身には触りません。
+          </p>
+          <button className="small danger" onClick={() => void openDelAll()} disabled={deleting}>
+            写真をすべて削除…
+          </button>
+        </section>
+
         {error && <p className="error">{error}</p>}
+        {delAll && (
+          <div className="modal-back confirm-back" onClick={() => !deleting && setDelAll(null)}>
+            <div className="modal confirm" role="alertdialog" aria-modal="true" aria-label="写真をすべて削除" onClick={(e) => e.stopPropagation()}>
+              <h2>写真をすべて完全に削除しますか？</h2>
+              <p>
+                保存フォルダ「<strong>{lib.rootName}</strong>」の写真 <strong>{delAll.photos.toLocaleString()} 枚</strong>({delAll.days.toLocaleString()} 日分)を削除します。
+              </p>
+              <p className="error">
+                原本・縮小版・サムネイルのファイルと、写真の説明・予定との紐づけが消えます。
+                <br />
+                ごみ箱には入らず、<strong>元に戻すことはできません。</strong>
+              </p>
+              <label className="opt">
+                <input type="checkbox" checked={delMemos} onChange={(e) => setDelMemos(e.target.checked)} disabled={deleting} />
+                日ごとのメモも削除する(チェックしなければメモは残します)
+              </label>
+              <label className="opt">
+                <input type="checkbox" checked={backedUp} onChange={(e) => setBackedUp(e.target.checked)} disabled={deleting} />
+                必要な写真のバックアップを取ったことを確認しました
+              </label>
+              {delProgress && <p className="small-text">{delProgress}</p>}
+              <div className="modal-foot">
+                <button className="ghost" onClick={() => setDelAll(null)} disabled={deleting} autoFocus>
+                  やめる
+                </button>
+                <button className="danger" onClick={() => void runDelAll()} disabled={deleting || !backedUp || !delAll.photos}>
+                  {deleting ? '削除中…' : `${delAll.photos.toLocaleString()} 枚をすべて削除する`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <p className="muted small-text">
           写真日記 {versionDetail}
         </p>

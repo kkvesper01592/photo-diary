@@ -192,6 +192,71 @@ export class Library {
     })
   }
 
+  /** 登録されている写真の枚数と日数(年ごとの索引から数える) */
+  async countAll(): Promise<{ photos: number; days: number }> {
+    let photos = 0
+    let days = 0
+    for (const y of await listEntries(this.root)) {
+      if (y.kind !== 'directory' || !/^\d{4}$/.test(y.name)) continue
+      for (const s of Object.values((await this.loadIndex(y.name)).days)) {
+        photos += s.count
+        if (s.count) days++
+      }
+    }
+    return { photos, days }
+  }
+
+  /**
+   * 写真をすべて完全に削除する(写真の整理し直し用)。
+   * 消すのは、日記.json に登録されている写真の原本・縮小版・サムネイルだけ。
+   * 保存フォルダにあるほかのフォルダ・ファイル(このアプリが作っていないもの)には触らない。
+   * deleteMemos=false ならメモは残す
+   */
+  deleteAllPhotos(deleteMemos: boolean, onProgress: (msg: string, deleted: number) => void): Promise<number> {
+    return this.serial(async () => {
+      let deleted = 0
+      const removeQuiet = async (dir: FileSystemDirectoryHandle, name: string) => {
+        try {
+          await dir.removeEntry(name)
+        } catch (e) {
+          // 無いもの・中身が残っているフォルダはそのまま
+          if (!(e instanceof DOMException && ['NotFoundError', 'InvalidModificationError'].includes(e.name))) throw e
+        }
+      }
+      for (const y of await listEntries(this.root)) {
+        if (y.kind !== 'directory' || !/^\d{4}$/.test(y.name)) continue
+        const ydir = y.handle as FileSystemDirectoryHandle
+        for (const d of await listEntries(ydir)) {
+          if (d.kind !== 'directory' || !/^\d{4}-\d{2}-\d{2}$/.test(d.name)) continue
+          const ddir = d.handle as FileSystemDirectoryHandle
+          if (!(await getFile(ddir, DAY_FILE))) continue // このアプリの日付フォルダではない
+          const day = await this.loadDay(d.name)
+          const reduced = await getDir(ddir, [REDUCED_DIR], false)
+          const thumbs = await getDir(ddir, [THUMB_DIR], false)
+          for (const p of day.photos) {
+            await removeQuiet(ddir, p.file)
+            if (reduced) await removeQuiet(reduced, derivedName(p.file))
+            if (thumbs) await removeQuiet(thumbs, derivedName(p.file))
+            deleted++
+            onProgress(d.name, deleted)
+          }
+          this.forgetThumbs(d.name)
+          if (deleteMemos || !day.memo.trim()) {
+            await removeQuiet(ddir, DAY_FILE)
+          } else if (day.photos.length) {
+            await writeBlob(ddir, DAY_FILE, JSON.stringify({ ...day, photos: [], updatedAt: new Date().toISOString() }, null, 2))
+          }
+          // 空になったフォルダだけ片付ける
+          await removeQuiet(ddir, REDUCED_DIR)
+          await removeQuiet(ddir, THUMB_DIR)
+          await removeQuiet(ydir, d.name)
+        }
+      }
+      await this.rebuildIndexesNow()
+      return deleted
+    })
+  }
+
   /** 別の PC で写真が差し替えられた場合に備え、サムネイルの URL を捨てる */
   forgetThumbs(date: string) {
     for (const [k, u] of this.urls) {
