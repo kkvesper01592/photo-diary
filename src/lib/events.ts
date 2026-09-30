@@ -1,5 +1,5 @@
 import type { CalendarEvent, CalendarListEntry } from '../google/calendarApi'
-import { addDays, hhmm, parseYmd } from './dates'
+import { addDays, hhmm, parseYmd, ymd } from './dates'
 import type { DayData, PhotoEntry } from '../storage/model'
 
 /** 画面で使う予定の形 */
@@ -44,6 +44,24 @@ export function eventsOnDay(events: DayEvent[], date: string): DayEvent[] {
   return events
     .filter((ev) => ev.start < e && (ev.end > s || (ev.end.getTime() === ev.start.getTime() && ev.start >= s)))
     .sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.getTime() - b.start.getTime())
+}
+
+/** 日付ごとの予定の一覧(月カレンダーで毎回全件を探さないように、一度だけ作る) */
+export function indexByDay(events: DayEvent[]): Map<string, DayEvent[]> {
+  const map = new Map<string, DayEvent[]>()
+  for (const ev of events) {
+    let d = new Date(ev.start.getFullYear(), ev.start.getMonth(), ev.start.getDate())
+    // 終わりの日(終了時刻ちょうどの 0:00 はその日に含めない)
+    const last = ev.end > ev.start ? new Date(ev.end.getTime() - 1) : ev.start
+    for (let n = 0; d <= last && n < 400; n++, d = addDays(d, 1)) {
+      const k = ymd(d)
+      const list = map.get(k)
+      if (list) list.push(ev)
+      else map.set(k, [ev])
+    }
+  }
+  for (const list of map.values()) list.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.getTime() - b.start.getTime())
+  return map
 }
 
 export function timeLabel(ev: DayEvent, date: string): string {

@@ -75,3 +75,15 @@ export const listEventsInRange = (token: AccessToken, calendarId: string, timeMi
     orderBy: 'startTime',
     maxResults: '2500',
   })
+
+/** 全期間の予定(繰り返しは1回ずつに展開。未来は2年先まで) */
+export function listAllExpanded(token: AccessToken, calendarId: string) {
+  const timeMax = new Date()
+  timeMax.setFullYear(timeMax.getFullYear() + 2)
+  return getAllPages<CalendarEvent>(token, `/calendars/${encodeURIComponent(calendarId)}/events`, {
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    timeMax: timeMax.toISOString(),
+    maxResults: '2500',
+  })
+}

@@ -162,6 +162,36 @@ export class Library {
     return url
   }
 
+  /**
+   * 写真を完全に削除する(原本・縮小版・サムネイルのファイルを消し、日記.json から外す)。元に戻せない。
+   * 先にファイルを消してから記録を外す(途中で失敗しても、見えないまま画像だけ残ることが無いように)
+   */
+  deletePhoto(date: string, file: string): Promise<DayData> {
+    return this.serial(async () => {
+      const dir = await this.dayDir(date, false)
+      if (dir) {
+        const removeIn = async (parts: string[], name: string) => {
+          const d = await getDir(dir, parts, false)
+          if (!d) return
+          try {
+            await d.removeEntry(name)
+          } catch (e) {
+            if (!(e instanceof DOMException && e.name === 'NotFoundError')) throw e
+          }
+        }
+        await removeIn([], file)
+        await removeIn([REDUCED_DIR], derivedName(file))
+        await removeIn([THUMB_DIR], derivedName(file))
+      }
+      this.forgetThumbs(date)
+      return this.updateDayNow(date, (d) => {
+        const before = d.photos.length
+        d.photos = d.photos.filter((p) => p.file !== file)
+        if (d.photos.length === before) return false
+      })
+    })
+  }
+
   /** 別の PC で写真が差し替えられた場合に備え、サムネイルの URL を捨てる */
   forgetThumbs(date: string) {
     for (const [k, u] of this.urls) {

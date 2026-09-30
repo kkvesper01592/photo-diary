@@ -14,18 +14,22 @@ interface Props {
   onMove: (file: string) => void
   onClose: () => void
   onSaved: (day: DayData) => void
+  onDeleted: (day: DayData, nextFile?: string) => void
 }
 
 const fmtSize = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`)
 
-export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, onClose, onSaved }: Props) {
+export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, onClose, onSaved, onDeleted }: Props) {
   const photo = day.photos.find((p) => p.file === file)
   const i = files.indexOf(file)
   const [url, setUrl] = useState<string>()
   const [caption, setCaption] = useState(photo?.caption ?? '')
   const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => setCaption(photo?.caption ?? ''), [file, photo?.caption])
+  useEffect(() => setConfirmDelete(false), [file])
 
   // 縮小版を表示(使い終わったら URL を解放)
   useEffect(() => {
@@ -49,13 +53,16 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'TEXTAREA') return
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        if (confirmDelete) setConfirmDelete(false)
+        else onClose()
+      } else if (confirmDelete) return
       else if (e.key === 'ArrowLeft' && i > 0) onMove(files[i - 1])
       else if (e.key === 'ArrowRight' && i < files.length - 1) onMove(files[i + 1])
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [i, files, onClose, onMove])
+  }, [i, files, onClose, onMove, confirmDelete])
 
   if (!photo) return null
 
@@ -75,6 +82,22 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
 
   const saveCaption = () => {
     if (caption !== photo.caption) void update((p) => void (p.caption = caption))
+  }
+
+  const doDelete = async () => {
+    setDeleting(true)
+    setError('')
+    try {
+      const d = await lib.deletePhoto(day.date, file)
+      const rest = files.filter((f) => f !== file && d.photos.some((p) => p.file === f))
+      const next = rest[Math.min(i, rest.length - 1)]
+      setConfirmDelete(false)
+      onDeleted(d, next)
+    } catch (e) {
+      setError(`削除できませんでした: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const openOriginal = async () => {
@@ -104,9 +127,14 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
           <span className="muted small-text">
             {i + 1} / {files.length}
           </span>
-          <button className="icon" onClick={onClose} aria-label="閉じる">
-            ×
-          </button>
+          <div className="btns">
+            <button className="small ghost" onClick={onClose}>
+              ← カレンダーに戻る
+            </button>
+            <button className="icon" onClick={onClose} aria-label="閉じる">
+              ×
+            </button>
+          </div>
         </div>
         <p className="viewer-date">
           {jpDate(parseYmd(day.date))} {photo.dateSource === 'exif' ? photo.takenAt.slice(11, 16) : <span className="muted">(撮影時刻の記録なし)</span>}
@@ -163,9 +191,14 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
         {error && <p className="error small-text">{error}</p>}
 
         <div className="viewer-foot">
-          <button className="small ghost" onClick={() => void openOriginal()}>
-            原本を開く
-          </button>
+          <div className="btns">
+            <button className="small ghost" onClick={() => void openOriginal()}>
+              原本を開く
+            </button>
+            <button className="small danger" onClick={() => setConfirmDelete(true)}>
+              削除
+            </button>
+          </div>
           <p className="muted small-text">
             {photo.file}
             <br />
@@ -179,6 +212,30 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
           </p>
         </div>
       </div>
+      {confirmDelete && (
+        <div className="modal-back confirm-back" onClick={() => !deleting && setConfirmDelete(false)}>
+          <div className="modal confirm" role="alertdialog" aria-modal="true" aria-label="写真の削除" onClick={(e) => e.stopPropagation()}>
+            <h2>この写真を完全に削除しますか？</h2>
+            <p>
+              <strong>{photo.file}</strong>({jpDate(parseYmd(day.date))}
+              {photo.dateSource === 'exif' && ` ${photo.takenAt.slice(11, 16)}`})
+            </p>
+            <p className="error">
+              保存フォルダから、原本・縮小版・サムネイルのファイルと、説明・予定との紐づけを削除します。
+              <br />
+              ごみ箱には入らず、<strong>元に戻すことはできません。</strong>
+            </p>
+            <div className="modal-foot">
+              <button className="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting} autoFocus>
+                やめる
+              </button>
+              <button className="danger" onClick={() => void doDelete()} disabled={deleting}>
+                {deleting ? '削除中…' : '完全に削除する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

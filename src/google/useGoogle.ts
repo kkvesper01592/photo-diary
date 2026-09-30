@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { requestAccessToken, revokeToken, type AccessToken } from './auth'
-import { AuthExpiredError, listCalendars, listEventsInRange, type CalendarEvent, type CalendarListEntry } from './calendarApi'
+import { AuthExpiredError, listAllExpanded, listCalendars, type CalendarEvent, type CalendarListEntry } from './calendarApi'
 import { SCOPE_CALENDAR_READONLY } from '../config'
 import { idbGet, idbSet } from '../lib/idb'
-import { toDayEvent, type DayEvent } from '../lib/events'
-import { ymd } from '../lib/dates'
+import { indexByDay, toDayEvent, type DayEvent } from '../lib/events'
 
 const LOGGED_IN = 'photodiary.loggedIn' // 一度許可した端末では、2回目から確認画面を出さない
 
@@ -66,57 +65,71 @@ export function useGoogle() {
   return { token, calendars, error, expired, login, logout, onAuthError }
 }
 
-interface CachedRange {
+const ALL_EVENTS = 'allEvents'
+
+interface AllEvents {
   fetchedAt: string
   byCal: Record<string, CalendarEvent[]>
 }
 
-/** 表示中の期間の予定。ログイン中は Google から取り、端末にも覚えておく(ログイン前・オフラインはその控えを表示) */
-export function useRangeEvents(
-  token: AccessToken | null,
-  calendars: CalendarListEntry[],
-  hidden: string[],
-  start: Date,
-  end: Date,
-  onAuthError: (e: unknown) => boolean,
-) {
-  const [data, setData] = useState<CachedRange | null>(null)
+// 端末に残す項目だけにする(容量を抑える)
+const slim = (e: CalendarEvent): CalendarEvent => ({
+  id: e.id,
+  status: e.status,
+  summary: e.summary,
+  description: e.description,
+  location: e.location,
+  start: e.start,
+  end: e.end,
+})
+
+/**
+ * 全期間の予定。ログインしたときに Google から全部取り直して端末に保存し、
+ * ログインしていないときも(次にログインするまで)その控えを表示する
+ */
+export function useAllEvents(token: AccessToken | null, calendars: CalendarListEntry[], hidden: string[], onAuthError: (e: unknown) => boolean) {
+  const [data, setData] = useState<AllEvents | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
-  const cacheKey = `events:${ymd(start)}:${ymd(end)}`
   const calIds = calendars.map((c) => c.id).join('\n')
 
   useEffect(() => {
+    idbGet<AllEvents>(ALL_EVENTS).then((c) => c && setData((cur) => cur ?? c))
+  }, [])
+
+  useEffect(() => {
+    if (!token || !calendars.length) return
     let alive = true
-    setError('')
-    idbGet<CachedRange>(cacheKey).then((c) => alive && setData(c ?? null))
-    if (!token || !calendars.length) return () => void (alive = false)
     setLoading(true)
+    setError('')
     ;(async () => {
       const byCal: Record<string, CalendarEvent[]> = {}
       const failed: string[] = []
       await Promise.all(
         calendars.map(async (c) => {
           try {
-            byCal[c.id] = await listEventsInRange(token, c.id, start, end)
+            byCal[c.id] = (await listAllExpanded(token, c.id)).map(slim)
           } catch (e) {
             if (onAuthError(e)) throw e
             failed.push(c.summaryOverride || c.summary)
           }
         }),
       )
-      const fresh: CachedRange = { fetchedAt: new Date().toISOString(), byCal }
-      await idbSet(cacheKey, fresh)
+      // 読めなかったカレンダーは、前回の控えを残す
+      const prev = (await idbGet<AllEvents>(ALL_EVENTS))?.byCal ?? {}
+      for (const c of calendars) if (!byCal[c.id] && prev[c.id]) byCal[c.id] = prev[c.id]
+      const fresh: AllEvents = { fetchedAt: new Date().toISOString(), byCal }
+      await idbSet(ALL_EVENTS, fresh)
       if (!alive) return
       setData(fresh)
-      if (failed.length) setError(`次のカレンダーを読み込めませんでした: ${failed.join('、')}`)
+      if (failed.length) setError(`次のカレンダーを読み込めませんでした(前回の控えを表示しています): ${failed.join('、')}`)
     })()
       .catch((e) => alive && !onAuthError(e) && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => alive && setLoading(false))
     return () => void (alive = false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, calIds, cacheKey, reloadKey])
+  }, [token, calIds, reloadKey])
 
   const events = useMemo(() => {
     if (!data) return []
@@ -132,5 +145,7 @@ export function useRangeEvents(
     return out
   }, [data, calendars, hidden])
 
-  return { events, loading, error, fetchedAt: data?.fetchedAt, fromCache: !token && !!data, reload: () => setReloadKey((k) => k + 1) }
+  const byDay = useMemo(() => indexByDay(events), [events])
+
+  return { byDay, count: events.length, loading, error, fetchedAt: data?.fetchedAt, reload: () => setReloadKey((k) => k + 1) }
 }

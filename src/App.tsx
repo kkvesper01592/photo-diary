@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { monthGrid, ymd } from './lib/dates'
 import { useNewerVersion, versionDetail, versionLabel } from './lib/version'
-import { eventsOnDay, isLinked } from './lib/events'
-import { useGoogle, useRangeEvents } from './google/useGoogle'
+import { isLinked } from './lib/events'
+import { useAllEvents, useGoogle } from './google/useGoogle'
 import { canPickFolder, loadSavedRoot, permissionOf, pickRoot, requestPermission, saveRoot } from './storage/fs'
 import { scanInbox } from './storage/importer'
 import { Library } from './storage/library'
@@ -117,7 +117,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
   const google = useGoogle()
   const newer = useNewerVersion()
   const grid = monthGrid(cursor.y, cursor.m)
-  const range = useRangeEvents(google.token, google.calendars, settings.hiddenCalendarIds, grid.start, grid.end, google.onAuthError)
+  const allEv = useAllEvents(google.token, google.calendars, settings.hiddenCalendarIds, google.onAuthError)
 
   const bump = useCallback(() => setRev((r) => r + 1), [])
 
@@ -179,7 +179,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
     setSettings(s)
   }
 
-  const dayEvents = eventsOnDay(range.events, selected)
+  const dayEvents = allEv.byDay.get(selected) ?? []
 
   return (
     <div className="app">
@@ -203,8 +203,17 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
           <button className="small" onClick={() => setModal('import')}>
             取り込み{inboxCount > 0 && <span className="badge" title={`取り込み用フォルダに写真が ${inboxCount} 枚あります`}>{inboxCount}</span>}
           </button>
-          {!google.token && (
-            <button className="small ghost" onClick={() => void google.login()} title="予定を表示するため(読み取りのみ)">
+          {google.token ? (
+            <button
+              className="small ghost"
+              onClick={allEv.reload}
+              disabled={allEv.loading}
+              title={allEv.fetchedAt && `前回の読み込み: ${new Date(allEv.fetchedAt).toLocaleString('ja-JP')}`}
+            >
+              {allEv.loading ? '予定を読み込み中…' : '予定を更新'}
+            </button>
+          ) : (
+            <button className="small ghost" onClick={() => void google.login()} title="予定を読み込むため(読み取りのみ)">
               Google にログイン
             </button>
           )}
@@ -236,15 +245,20 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
           </button>
         </div>
       )}
-      {range.error && <div className="banner warn-banner">{range.error}</div>}
-      {range.fromCache && range.fetchedAt && (
-        <div className="banner small-text">
-          ログイン前のため、前回取得した予定({new Date(range.fetchedAt).toLocaleString('ja-JP')} 時点)を表示しています。
-        </div>
+      {allEv.error && <div className="banner warn-banner">{allEv.error}</div>}
+      {allEv.loading ? (
+        <div className="banner small-text">Google から全期間の予定を読み込んでいます…</div>
+      ) : (
+        !google.token &&
+        allEv.fetchedAt && (
+          <div className="banner small-text">
+            前回ログインしたときの予定({new Date(allEv.fetchedAt).toLocaleString('ja-JP')} 時点・{allEv.count.toLocaleString()} 件)を表示しています。最新にするには Google にログインしてください。
+          </div>
+        )
       )}
 
       <main className="layout">
-        <MonthView lib={lib} year={cursor.y} month0={cursor.m} days={days} events={range.events} selected={selected} onSelect={setSelected} />
+        <MonthView lib={lib} year={cursor.y} month0={cursor.m} days={days} byDay={allEv.byDay} selected={selected} onSelect={setSelected} />
         <DayPanel
           lib={lib}
           date={selected}
@@ -263,13 +277,17 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
         <PhotoViewer
           lib={lib}
           day={viewer.day}
-          dayEvents={eventsOnDay(range.events, viewer.day.date)}
+          dayEvents={allEv.byDay.get(viewer.day.date) ?? []}
           files={viewer.files}
           file={viewer.file}
           onMove={(file) => setViewer((v) => v && { ...v, file })}
           onClose={() => setViewer(null)}
           onSaved={(day) => {
             setViewer((v) => v && { ...v, day })
+            bump()
+          }}
+          onDeleted={(day, next) => {
+            setViewer((v) => (v && next ? { day, file: next, files: v.files.filter((f) => day.photos.some((p) => p.file === f)) } : null))
             bump()
           }}
         />

@@ -1,6 +1,6 @@
 import { holidayName } from '../lib/holidays'
 import { WEEKDAYS, monthGrid, ymd } from '../lib/dates'
-import { eventsOnDay, type DayEvent } from '../lib/events'
+import type { DayEvent } from '../lib/events'
 import type { Library } from '../storage/library'
 import type { DaySummary } from '../storage/model'
 import Thumb from './Thumb'
@@ -10,14 +10,14 @@ interface Props {
   year: number
   month0: number
   days: Record<string, DaySummary>
-  events: DayEvent[]
+  byDay: Map<string, DayEvent[]>
   selected: string
   onSelect: (date: string) => void
 }
 
 const MAX_CHIPS = 2
 
-export default function MonthView({ lib, year, month0, days, events, selected, onSelect }: Props) {
+export default function MonthView({ lib, year, month0, days, byDay, selected, onSelect }: Props) {
   const grid = monthGrid(year, month0).days
   const today = ymd(new Date())
   return (
@@ -34,7 +34,7 @@ export default function MonthView({ lib, year, month0, days, events, selected, o
           const key = ymd(d)
           const hol = holidayName(d.getFullYear(), d.getMonth() + 1, d.getDate())
           const s = days[key]
-          const evs = eventsOnDay(events, key)
+          const evs = byDay.get(key) ?? []
           const cls = [
             'cell',
             d.getMonth() !== month0 && 'other',

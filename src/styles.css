@@ -228,3 +228,8 @@ textarea {
 .foot-note { margin-right: auto; }
 .version-tag { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 2px 8px; border-radius: 999px; cursor: pointer; white-space: nowrap; align-self: center; }
 .version-tag:hover { color: inherit; }
+button.danger { background: #c62828; color: #fff; }
+button.danger:hover:not(:disabled) { background: #a51f1f; }
+.confirm-back { z-index: 30; align-items: center; }
+.confirm { max-width: 460px; }
+.confirm h2 { margin: 0 0 8px; font-size: 18px; }
