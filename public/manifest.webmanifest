@@ -1,0 +1,16 @@
+{
+  "name": "写真日記",
+  "short_name": "写真日記",
+  "description": "仕事の写真を日付ごとにメモ付きで整理する写真日記(写真は自分の PC・NAS にだけ保存)",
+  "lang": "ja",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#15171b",
+  "theme_color": "#168a78",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

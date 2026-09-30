@@ -11,4 +11,9 @@ if (import.meta.env.DEV && new URLSearchParams(location.search).has('demo')) {
 // この端末のサイトデータ(保存フォルダの場所・予定の控え)を、容量不足などで自動削除されにくくする
 navigator.storage?.persist?.().catch(() => {})
 
+// 本番だけ Service Worker を登録(デスクトップアプリとしてのインストール用)
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {})
+}
+
 createRoot(document.getElementById('root')!).render(<App />)
