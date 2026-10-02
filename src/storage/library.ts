@@ -8,6 +8,7 @@ import {
   MEMO_HISTORY_MAX,
   captionsOf,
   type MemoHistory,
+  type MemoVersion,
   DEFAULT_SETTINGS,
   INBOX,
   INDEX_FILE,
@@ -24,6 +25,15 @@ import {
 
 
 export type PhotoKind = 'thumb' | 'reduced' | 'original'
+
+/** 保存のときに履歴へ残すか(updateDay を参照) */
+export interface HistoryMode {
+  before?: boolean
+  after?: boolean
+}
+
+const sameContent = (a: { memo: string; captions: Record<string, string> }, b: { memo: string; captions: Record<string, string> }) =>
+  a.memo === b.memo && JSON.stringify(a.captions) === JSON.stringify(b.captions)
 
 /** 別の PC で先にメモが変更されていた */
 export class ConflictError extends Error {
@@ -92,24 +102,31 @@ export class Library {
    * 最新の内容を読み直してから変更を当てて保存する(ほかの PC の変更を消さないため)。
    * change は最新の内容を受け取り、書き換える。false を返すと保存しない
    */
-  updateDay(date: string, change: (d: DayData) => void | false): Promise<DayData> {
-    return this.serial(() => this.updateDayNow(date, change))
+  updateDay(date: string, change: (d: DayData) => void | false, history: HistoryMode = {}): Promise<DayData> {
+    return this.serial(() => this.updateDayNow(date, change, history))
   }
 
-  private async updateDayNow(date: string, change: (d: DayData) => void | false): Promise<DayData> {
+  /**
+   * history.before: 変更前の内容を履歴に残す(削除・説明を消す・履歴から戻すなど、内容が消える操作)
+   * history.after: 変更後の内容を履歴に残す(「保存」ボタン)
+   * どちらも無い(自動保存): 履歴には残さない
+   */
+  private async updateDayNow(date: string, change: (d: DayData) => void | false, history: HistoryMode = {}): Promise<DayData> {
     const latest = await this.loadDay(date)
-    const before = { memo: latest.memo, captions: captionsOf(latest), savedAt: latest.updatedAt }
+    const before = { savedAt: latest.updatedAt, memo: latest.memo, captions: captionsOf(latest) }
     if (change(latest) === false) return latest
     latest.updatedAt = new Date().toISOString()
+    const now = { savedAt: latest.updatedAt, memo: latest.memo, captions: captionsOf(latest) }
     // 先に履歴へ控えてから日記.json を書き換える(書き換えの途中で失敗しても、前の内容が履歴に残る)
-    await this.appendMemoHistory(date, before, latest)
+    if (history.before && !sameContent(before, now)) await this.appendVersion(date, before)
     const dir = (await this.dayDir(date, true))!
     await writeBlob(dir, DAY_FILE, JSON.stringify(latest, null, 2))
     await this.updateIndex(date, latest)
+    if (history.after) await this.appendVersion(date, now)
     return latest
   }
 
-  // ---- メモ・説明の履歴(絶対に消さない控え) ----
+  // ---- メモ・説明の履歴(写真の削除などの操作では消さない控え) ----
   private memoHistoryDir(date: string, create: boolean) {
     return getDir(this.root, [DATA_DIR, MEMO_BACKUP_DIR, yearOf(date)], create)
   }
@@ -120,24 +137,24 @@ export class Library {
     return h ?? { version: 1, date, versions: [] }
   }
 
-  /** メモ・説明が変わったときだけ履歴に追加する。初めてのときは変更前の内容も入れる */
-  private async appendMemoHistory(date: string, before: { memo: string; captions: Record<string, string>; savedAt: string }, after: DayData) {
-    const now = { memo: after.memo, captions: captionsOf(after) }
-    const same = (a: { memo: string; captions: Record<string, string> }, b: { memo: string; captions: Record<string, string> }) =>
-      a.memo === b.memo && JSON.stringify(a.captions) === JSON.stringify(b.captions)
-    if (same(before, now)) return
+  /** 履歴に1件追加する。空の内容・直前と同じ内容は追加しない */
+  private async appendVersion(date: string, v: MemoVersion) {
+    if (!v.memo.trim() && !Object.keys(v.captions).length) return
     const h = await this.loadMemoHistory(date)
     const last = h.versions[h.versions.length - 1]
-    const count = h.versions.length
-    const hasContent = (v: { memo: string; captions: Record<string, string> }) => !!v.memo.trim() || Object.keys(v.captions).length > 0
-    // 履歴に無い変更前の内容(履歴を作る前に書いたメモなど)も残す
-    if (hasContent(before) && (!last || !same(last, before))) h.versions.push({ savedAt: before.savedAt, memo: before.memo, captions: before.captions })
-    // 中身が空になった版(メモも説明も無い)は残さない
-    if (hasContent(now)) h.versions.push({ savedAt: after.updatedAt, ...now })
-    if (h.versions.length === count) return // 追加するものが無ければ書かない
+    if (last && sameContent(last, v)) return
+    h.versions.push({ ...v, savedAt: v.savedAt || new Date().toISOString() })
     if (h.versions.length > MEMO_HISTORY_MAX) h.versions = h.versions.slice(-MEMO_HISTORY_MAX)
     const dir = (await this.memoHistoryDir(date, true))!
     await writeBlob(dir, `${date}.json`, JSON.stringify(h, null, 2))
+  }
+
+  /** 「保存」ボタン: 今保存されている内容を履歴に残す(直前の履歴と同じなら何もしない) */
+  recordHistory(date: string): Promise<void> {
+    return this.serial(async () => {
+      const d = await this.loadDay(date)
+      await this.appendVersion(date, { savedAt: new Date().toISOString(), memo: d.memo, captions: captionsOf(d) })
+    })
   }
 
   // ---- 予定の控え(ブラウザのデータが消えても、ここから戻せる) ----
@@ -254,7 +271,7 @@ export class Library {
         const before = d.photos.length
         d.photos = d.photos.filter((p) => p.file !== file)
         if (d.photos.length === before) return false
-      })
+      }, { before: true })
     })
   }
 
@@ -308,7 +325,7 @@ export class Library {
           }
           this.forgetThumbs(d.name)
           // メモは絶対に消さない(メモの無い日だけ日記.json を片付ける)。写真の説明はメモの履歴に控える
-          if (day.photos.length) await this.updateDayNow(d.name, (x) => void (x.photos = []))
+          if (day.photos.length) await this.updateDayNow(d.name, (x) => void (x.photos = []), { before: true })
           if (!day.memo.trim()) await removeQuiet(ddir, DAY_FILE)
           // 空になったフォルダだけ片付ける
           await removeQuiet(ddir, REDUCED_DIR)
@@ -333,10 +350,14 @@ export class Library {
 }
 
 /** メモを保存。読み込んだ後にほかの PC でメモが変わっていたら ConflictError */
-export async function saveMemo(lib: Library, date: string, baseMemo: string, myMemo: string): Promise<DayData> {
-  return lib.updateDay(date, (d) => {
-    if (d.memo === myMemo) return false
-    if (d.memo !== baseMemo) throw new ConflictError(d)
-    d.memo = myMemo
-  })
+export async function saveMemo(lib: Library, date: string, baseMemo: string, myMemo: string, history: HistoryMode = {}): Promise<DayData> {
+  return lib.updateDay(
+    date,
+    (d) => {
+      if (d.memo === myMemo) return false
+      if (d.memo !== baseMemo) throw new ConflictError(d)
+      d.memo = myMemo
+    },
+    history,
+  )
 }

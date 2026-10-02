@@ -15,7 +15,7 @@ interface Props {
   onOpenPhoto: (day: DayData, file: string, filterKey?: string) => void
 }
 
-type SaveState = '' | 'editing' | 'saving' | 'saved' | 'error'
+type SaveState = '' | 'editing' | 'saving' | 'saved' | 'recorded' | 'error'
 
 export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPhoto }: Props) {
   const [day, setDay] = useState<DayData>(emptyDay(date))
@@ -121,6 +121,35 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
     timer.current = window.setTimeout(() => void flush(), 1500)
   }
 
+  /** 「保存」ボタン: 入力中の内容を保存し、履歴に記録する */
+  const saveWithHistory = async () => {
+    await flush()
+    if (pending.current) return // 保存できなかった(競合など)
+    try {
+      await lib.recordHistory(date)
+      setSave('recorded')
+    } catch (e) {
+      setSave('error')
+      setSaveError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /** 履歴から戻す(戻す前の内容・戻した内容の両方を履歴に残す) */
+  const restoreMemo = async (text: string) => {
+    await flush()
+    if (pending.current) return
+    try {
+      const d = await lib.updateDay(date, (x) => (x.memo === text ? false : void (x.memo = text)), { before: true, after: true })
+      setDay(d)
+      setMemo(d.memo)
+      setSave('recorded')
+      onSaved()
+    } catch (e) {
+      setSave('error')
+      setSaveError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const resolveConflict = async (how: 'mine' | 'theirs' | 'both') => {
     const p = pending.current
     const latest = conflict
@@ -222,8 +251,11 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
       <section>
         <h3>
           メモ <span className="save-state">{saveLabel(save)}</span>
+          <button className="small push-right" onClick={() => void saveWithHistory()} title="今の内容を保存して、履歴に記録します">
+            保存
+          </button>
           <button
-            className="link small-text push-right"
+            className="link small-text"
             onClick={() => {
               setHistoryError('')
               void flush()
@@ -356,17 +388,15 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
                   <li key={`${v.savedAt}-${i}`}>
                     <div className="history-head">
                       <span className="small-text muted">{v.savedAt ? new Date(v.savedAt).toLocaleString('ja-JP') : '(日時不明)'}</span>
-                      {i === 0 ? (
-                        <span className="small-text muted">今の内容</span>
+                      {v.memo === memo ? (
+                        <span className="small-text muted">今のメモと同じ</span>
                       ) : (
                         <button
                           className="small ghost"
-                          disabled={v.memo === memo}
                           onClick={() => {
                             if (!window.confirm('今のメモを、この時点の内容に戻しますか？(今の内容も履歴に残ります)')) return
                             setHistory(null)
-                            onMemoChange(v.memo)
-                            void flush()
+                            void restoreMemo(v.memo)
                           }}
                         >
                           このメモに戻す
@@ -437,7 +467,9 @@ function saveLabel(s: SaveState) {
     case 'saving':
       return '保存中…'
     case 'saved':
-      return '保存しました'
+      return '自動保存しました'
+    case 'recorded':
+      return '保存しました(履歴に記録)'
     case 'error':
       return '未保存'
     default:

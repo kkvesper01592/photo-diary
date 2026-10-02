@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { jpDate, parseYmd } from '../lib/dates'
 import { isLinked, setLink, timeLabel, type DayEvent } from '../lib/events'
 import { mapUrlOf } from '../lib/maps'
-import type { Library } from '../storage/library'
+import type { HistoryMode, Library } from '../storage/library'
 import type { DayData, PhotoEntry } from '../storage/model'
 
 interface Props {
@@ -25,11 +25,17 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
   const [url, setUrl] = useState<string>()
   const [caption, setCaption] = useState(photo?.caption ?? '')
   const [error, setError] = useState('')
+  const [captionState, setCaptionState] = useState<'' | 'editing' | 'saved' | 'recorded'>('')
+  const captionTimer = useRef<number>(undefined)
+  const captionPending = useRef<{ file: string; text: string } | null>(null) // まだ保存していない説明
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => setCaption(photo?.caption ?? ''), [file, photo?.caption])
-  useEffect(() => setConfirmDelete(false), [file])
+  useEffect(() => {
+    setConfirmDelete(false)
+    setCaptionState('')
+  }, [file])
 
   // 縮小版を表示(使い終わったら URL を解放)
   useEffect(() => {
@@ -66,22 +72,66 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
 
   if (!photo) return null
 
-  const update = async (change: (p: PhotoEntry) => void) => {
+  const update = async (change: (p: PhotoEntry) => void, history: HistoryMode = {}, target = file): Promise<boolean> => {
     setError('')
     try {
-      const d = await lib.updateDay(day.date, (latest) => {
-        const p = latest.photos.find((x) => x.file === file)
-        if (!p) throw new Error('この写真は、ほかの PC で変更されたため見つかりません')
-        change(p)
-      })
+      const d = await lib.updateDay(
+        day.date,
+        (latest) => {
+          const p = latest.photos.find((x) => x.file === target)
+          if (!p) throw new Error('この写真は、ほかの PC で変更されたため見つかりません')
+          change(p)
+        },
+        history,
+      )
       onSaved(d)
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return false
     }
   }
 
-  const saveCaption = () => {
-    if (caption !== photo.caption) void update((p) => void (p.caption = caption))
+  // 説明の自動保存(手を止めて約1.5秒後・欄から離れたとき)。履歴には残さない
+  const saveCaption = async () => {
+    window.clearTimeout(captionTimer.current)
+    captionPending.current = null
+    if (caption === photo.caption) return true
+    const ok = await update((p) => void (p.caption = caption))
+    if (ok) setCaptionState('saved')
+    return ok
+  }
+
+  const onCaptionChange = (v: string) => {
+    setCaption(v)
+    setCaptionState('editing')
+    window.clearTimeout(captionTimer.current)
+    captionPending.current = { file, text: v }
+    captionTimer.current = window.setTimeout(flushCaption, 1500)
+  }
+
+  const flushCaption = () => {
+    window.clearTimeout(captionTimer.current)
+    const p = captionPending.current
+    if (!p) return
+    captionPending.current = null
+    void update((x) => void (x.caption = p.text), {}, p.file).then((ok) => ok && setCaptionState('saved'))
+  }
+  const flushRef = useRef(flushCaption)
+  flushRef.current = flushCaption
+
+  // 写真を切り替える・閉じるときに、待っている自動保存を済ませる
+  useEffect(() => () => flushRef.current(), [file])
+
+  /** 「保存」ボタン: 説明を保存して、履歴に記録する */
+  const saveCaptionWithHistory = async () => {
+    if (!(await saveCaption())) return
+    try {
+      await lib.recordHistory(day.date)
+      setCaptionState('recorded')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   const doDelete = async () => {
@@ -142,22 +192,32 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
 
         <div className="field">
           <span className="field-head">
-            <label htmlFor="caption-input">説明</label>
+            <label htmlFor="caption-input">
+              説明 <span className="save-state">{captionLabel(captionState)}</span>
+            </label>
+            <span className="btns">
+              <button className="small" onClick={() => void saveCaptionWithHistory()} title="今の説明を保存して、履歴に記録します">
+                保存
+              </button>
             {caption && (
               <button
                 className="small ghost"
                 title="今の説明を消します(これまでの内容は履歴に残ります)"
                 onClick={() => {
                   if (!window.confirm('この写真の説明を消しますか？(これまでの内容は、日の画面の「履歴」に残ります)')) return
+                  window.clearTimeout(captionTimer.current)
+                  captionPending.current = null
                   setCaption('')
-                  if (photo.caption) void update((p) => void (p.caption = ''))
+                  // 消す前の内容を履歴に残してから消す
+                  void update((p) => void (p.caption = ''), { before: true }).then((ok) => ok && setCaptionState('saved'))
                 }}
               >
                 説明を消す
               </button>
             )}
+            </span>
           </span>
-          <textarea id="caption-input" value={caption} onChange={(e) => setCaption(e.target.value)} onBlur={saveCaption} rows={3} placeholder="この写真の説明" />
+          <textarea id="caption-input" value={caption} onChange={(e) => onCaptionChange(e.target.value)} onBlur={() => void saveCaption()} rows={3} placeholder="この写真の説明" />
         </div>
 
         <div className="field">
@@ -253,4 +313,8 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
       )}
     </div>
   )
+}
+
+function captionLabel(s: '' | 'editing' | 'saved' | 'recorded') {
+  return s === 'editing' ? '入力中…' : s === 'saved' ? '自動保存しました' : s === 'recorded' ? '保存しました(履歴に記録)' : ''
 }
