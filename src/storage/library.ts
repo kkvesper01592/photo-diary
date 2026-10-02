@@ -128,10 +128,13 @@ export class Library {
     if (same(before, now)) return
     const h = await this.loadMemoHistory(date)
     const last = h.versions[h.versions.length - 1]
+    const count = h.versions.length
     const hasContent = (v: { memo: string; captions: Record<string, string> }) => !!v.memo.trim() || Object.keys(v.captions).length > 0
     // 履歴に無い変更前の内容(履歴を作る前に書いたメモなど)も残す
     if (hasContent(before) && (!last || !same(last, before))) h.versions.push({ savedAt: before.savedAt, memo: before.memo, captions: before.captions })
-    h.versions.push({ savedAt: after.updatedAt, ...now })
+    // 中身が空になった版(メモも説明も無い)は残さない
+    if (hasContent(now)) h.versions.push({ savedAt: after.updatedAt, ...now })
+    if (h.versions.length === count) return // 追加するものが無ければ書かない
     if (h.versions.length > MEMO_HISTORY_MAX) h.versions = h.versions.slice(-MEMO_HISTORY_MAX)
     const dir = (await this.memoHistoryDir(date, true))!
     await writeBlob(dir, `${date}.json`, JSON.stringify(h, null, 2))

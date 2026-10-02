@@ -250,3 +250,4 @@ button.danger:hover:not(:disabled) { background: #a51f1f; }
 .history-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .history-memo { white-space: pre-wrap; font: inherit; font-size: 14px; margin: 4px 0; }
 .history-captions { margin: 0; padding-left: 18px; }
+.field-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }

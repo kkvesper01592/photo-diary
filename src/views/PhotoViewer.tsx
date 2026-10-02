@@ -140,10 +140,25 @@ export default function PhotoViewer({ lib, day, dayEvents, files, file, onMove, 
           {jpDate(parseYmd(day.date))} {photo.dateSource === 'exif' ? photo.takenAt.slice(11, 16) : <span className="muted">(撮影時刻の記録なし)</span>}
         </p>
 
-        <label className="field">
-          <span>説明</span>
-          <textarea value={caption} onChange={(e) => setCaption(e.target.value)} onBlur={saveCaption} rows={3} placeholder="この写真の説明" />
-        </label>
+        <div className="field">
+          <span className="field-head">
+            <label htmlFor="caption-input">説明</label>
+            {caption && (
+              <button
+                className="small ghost"
+                title="今の説明を消します(これまでの内容は履歴に残ります)"
+                onClick={() => {
+                  if (!window.confirm('この写真の説明を消しますか？(これまでの内容は、日の画面の「履歴」に残ります)')) return
+                  setCaption('')
+                  if (photo.caption) void update((p) => void (p.caption = ''))
+                }}
+              >
+                説明を消す
+              </button>
+            )}
+          </span>
+          <textarea id="caption-input" value={caption} onChange={(e) => setCaption(e.target.value)} onBlur={saveCaption} rows={3} placeholder="この写真の説明" />
+        </div>
 
         <div className="field">
           <span>撮影場所</span>
