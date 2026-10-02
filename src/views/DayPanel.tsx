@@ -3,7 +3,7 @@ import { jpDate, parseYmd } from '../lib/dates'
 import { holidayName } from '../lib/holidays'
 import { isLinked, timeLabel, type DayEvent } from '../lib/events'
 import { ConflictError, saveMemo, type Library } from '../storage/library'
-import { emptyDay, type DayData } from '../storage/model'
+import { emptyDay, type DayData, type MemoHistory } from '../storage/model'
 import Thumb from './Thumb'
 
 interface Props {
@@ -31,6 +31,8 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
   const [confirmDel, setConfirmDel] = useState(false)
   const [delProgress, setDelProgress] = useState<{ done: number; total: number } | null>(null)
   const [delError, setDelError] = useState('')
+  const [history, setHistory] = useState<MemoHistory | null>(null)
+  const [historyError, setHistoryError] = useState('')
 
   // 保存待ちのメモ(日付を切り替えたときにも保存するため ref で持つ)
   const pending = useRef<{ date: string; base: string; memo: string } | null>(null)
@@ -220,7 +222,21 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
       <section>
         <h3>
           メモ <span className="save-state">{saveLabel(save)}</span>
+          <button
+            className="link small-text push-right"
+            onClick={() => {
+              setHistoryError('')
+              void flush()
+                .then(() => lib.loadMemoHistory(date))
+                .then(setHistory)
+                .catch((e) => setHistoryError(e instanceof Error ? e.message : String(e)))
+            }}
+            title="これまでに保存したメモ・写真の説明を見て、元に戻せます"
+          >
+            履歴
+          </button>
         </h3>
+        {historyError && <p className="error small-text">{historyError}</p>}
         <textarea
           className="memo"
           value={memo}
@@ -321,6 +337,59 @@ export default function DayPanel({ lib, date, dayEvents, rev, onSaved, onOpenPho
           </div>
         )}
       </section>
+
+      {history && (
+        <div className="modal-back confirm-back" onClick={() => setHistory(null)}>
+          <div className="modal history" role="dialog" aria-modal="true" aria-label="メモの履歴" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>{jpDate(d)} のメモの履歴</h2>
+              <button className="icon" onClick={() => setHistory(null)} aria-label="閉じる">
+                ×
+              </button>
+            </div>
+            <p className="muted small-text">保存のたびに控えています(新しい順)。写真を削除しても、この履歴は消えません。</p>
+            {history.versions.length === 0 ? (
+              <p className="muted">まだ履歴はありません</p>
+            ) : (
+              <ul className="history-list">
+                {[...history.versions].reverse().map((v, i) => (
+                  <li key={`${v.savedAt}-${i}`}>
+                    <div className="history-head">
+                      <span className="small-text muted">{v.savedAt ? new Date(v.savedAt).toLocaleString('ja-JP') : '(日時不明)'}</span>
+                      {i === 0 ? (
+                        <span className="small-text muted">今の内容</span>
+                      ) : (
+                        <button
+                          className="small ghost"
+                          disabled={v.memo === memo}
+                          onClick={() => {
+                            if (!window.confirm('今のメモを、この時点の内容に戻しますか？(今の内容も履歴に残ります)')) return
+                            setHistory(null)
+                            onMemoChange(v.memo)
+                            void flush()
+                          }}
+                        >
+                          このメモに戻す
+                        </button>
+                      )}
+                    </div>
+                    <pre className="history-memo">{v.memo || '(メモなし)'}</pre>
+                    {Object.keys(v.captions).length > 0 && (
+                      <ul className="small-text muted history-captions">
+                        {Object.entries(v.captions).map(([f, c]) => (
+                          <li key={f}>
+                            {f}: {c}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {confirmDel && (
         <div className="modal-back confirm-back" onClick={() => !delProgress && setConfirmDel(false)}>

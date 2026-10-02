@@ -26,7 +26,6 @@ export default function SettingsPanel(p: Props) {
   const [busy, setBusy] = useState(false)
   // 写真をすべて削除
   const [delAll, setDelAll] = useState<{ photos: number; days: number } | null>(null)
-  const [delMemos, setDelMemos] = useState(false)
   const [backedUp, setBackedUp] = useState(false)
   const [delProgress, setDelProgress] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -35,7 +34,6 @@ export default function SettingsPanel(p: Props) {
     setError('')
     setMsg('')
     try {
-      setDelMemos(false)
       setBackedUp(false)
       setDelProgress('')
       setDelAll(await lib.countAll())
@@ -48,9 +46,9 @@ export default function SettingsPanel(p: Props) {
     setDeleting(true)
     setError('')
     try {
-      const n = await lib.deleteAllPhotos(delMemos, (date, done) => setDelProgress(`削除中… ${done} 枚目(${date})`))
+      const n = await lib.deleteAllPhotos((date, done) => setDelProgress(`削除中… ${done} 枚目(${date})`))
       setDelAll(null)
-      setMsg(`写真 ${n} 枚を削除しました${delMemos ? '(メモも削除しました)' : '(メモは残しています)'}`)
+      setMsg(`写真 ${n} 枚を削除しました(メモは残しています)`)
       p.onRebuilt()
     } catch (e) {
       setError(`削除の途中で止まりました: ${e instanceof Error ? e.message : e}`)
@@ -210,10 +208,7 @@ export default function SettingsPanel(p: Props) {
                 <br />
                 ごみ箱には入らず、<strong>元に戻すことはできません。</strong>
               </p>
-              <label className="opt">
-                <input type="checkbox" checked={delMemos} onChange={(e) => setDelMemos(e.target.checked)} disabled={deleting} />
-                日ごとのメモも削除する(チェックしなければメモは残します)
-              </label>
+              <p className="small-text">日ごとのメモは削除しません(写真を取り込み直せば、同じ日のメモと一緒に表示されます)。</p>
               <label className="opt">
                 <input type="checkbox" checked={backedUp} onChange={(e) => setBackedUp(e.target.checked)} disabled={deleting} />
                 必要な写真のバックアップを取ったことを確認しました

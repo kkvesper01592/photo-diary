@@ -1,6 +1,13 @@
 import { getDir, getFile, listEntries, readText, writeBlob } from './fs'
 import {
+  DATA_DIR,
   DAY_FILE,
+  EVENTS_FILE,
+  EVENTS_PREV_FILE,
+  MEMO_BACKUP_DIR,
+  MEMO_HISTORY_MAX,
+  captionsOf,
+  type MemoHistory,
   DEFAULT_SETTINGS,
   INBOX,
   INDEX_FILE,
@@ -91,12 +98,68 @@ export class Library {
 
   private async updateDayNow(date: string, change: (d: DayData) => void | false): Promise<DayData> {
     const latest = await this.loadDay(date)
+    const before = { memo: latest.memo, captions: captionsOf(latest), savedAt: latest.updatedAt }
     if (change(latest) === false) return latest
     latest.updatedAt = new Date().toISOString()
+    // 先に履歴へ控えてから日記.json を書き換える(書き換えの途中で失敗しても、前の内容が履歴に残る)
+    await this.appendMemoHistory(date, before, latest)
     const dir = (await this.dayDir(date, true))!
     await writeBlob(dir, DAY_FILE, JSON.stringify(latest, null, 2))
     await this.updateIndex(date, latest)
     return latest
+  }
+
+  // ---- メモ・説明の履歴(絶対に消さない控え) ----
+  private memoHistoryDir(date: string, create: boolean) {
+    return getDir(this.root, [DATA_DIR, MEMO_BACKUP_DIR, yearOf(date)], create)
+  }
+
+  async loadMemoHistory(date: string): Promise<MemoHistory> {
+    const dir = await this.memoHistoryDir(date, false)
+    const h = dir && parseJson<MemoHistory>(await readText(dir, `${date}.json`), `${MEMO_BACKUP_DIR}/${date}.json`)
+    return h ?? { version: 1, date, versions: [] }
+  }
+
+  /** メモ・説明が変わったときだけ履歴に追加する。初めてのときは変更前の内容も入れる */
+  private async appendMemoHistory(date: string, before: { memo: string; captions: Record<string, string>; savedAt: string }, after: DayData) {
+    const now = { memo: after.memo, captions: captionsOf(after) }
+    const same = (a: { memo: string; captions: Record<string, string> }, b: { memo: string; captions: Record<string, string> }) =>
+      a.memo === b.memo && JSON.stringify(a.captions) === JSON.stringify(b.captions)
+    if (same(before, now)) return
+    const h = await this.loadMemoHistory(date)
+    const last = h.versions[h.versions.length - 1]
+    const hasContent = (v: { memo: string; captions: Record<string, string> }) => !!v.memo.trim() || Object.keys(v.captions).length > 0
+    // 履歴に無い変更前の内容(履歴を作る前に書いたメモなど)も残す
+    if (hasContent(before) && (!last || !same(last, before))) h.versions.push({ savedAt: before.savedAt, memo: before.memo, captions: before.captions })
+    h.versions.push({ savedAt: after.updatedAt, ...now })
+    if (h.versions.length > MEMO_HISTORY_MAX) h.versions = h.versions.slice(-MEMO_HISTORY_MAX)
+    const dir = (await this.memoHistoryDir(date, true))!
+    await writeBlob(dir, `${date}.json`, JSON.stringify(h, null, 2))
+  }
+
+  // ---- 予定の控え(ブラウザのデータが消えても、ここから戻せる) ----
+  async loadEventsBackup<T>(): Promise<T | undefined> {
+    const dir = await getDir(this.root, [DATA_DIR], false)
+    if (!dir) return undefined
+    for (const name of [EVENTS_FILE, EVENTS_PREV_FILE]) {
+      try {
+        const v = parseJson<T>(await readText(dir, name), name)
+        if (v) return v
+      } catch {
+        /* 壊れていたら前回の控えを使う */
+      }
+    }
+    return undefined
+  }
+
+  /** 予定の控えを保存(今の控えは「前回」として1つ残す) */
+  saveEventsBackup(data: unknown) {
+    return this.serial(async () => {
+      const dir = (await getDir(this.root, [DATA_DIR], true))!
+      const cur = await readText(dir, EVENTS_FILE)
+      if (cur) await writeBlob(dir, EVENTS_PREV_FILE, cur)
+      await writeBlob(dir, EVENTS_FILE, JSON.stringify(data))
+    })
   }
 
   // ---- 年ごとの索引(月カレンダー用) ----
@@ -210,9 +273,9 @@ export class Library {
    * 写真をすべて完全に削除する(写真の整理し直し用)。
    * 消すのは、日記.json に登録されている写真の原本・縮小版・サムネイルだけ。
    * 保存フォルダにあるほかのフォルダ・ファイル(このアプリが作っていないもの)には触らない。
-   * deleteMemos=false ならメモは残す
+   * メモは消さない
    */
-  deleteAllPhotos(deleteMemos: boolean, onProgress: (msg: string, deleted: number) => void): Promise<number> {
+  deleteAllPhotos(onProgress: (msg: string, deleted: number) => void): Promise<number> {
     return this.serial(async () => {
       let deleted = 0
       const removeQuiet = async (dir: FileSystemDirectoryHandle, name: string) => {
@@ -241,11 +304,9 @@ export class Library {
             onProgress(d.name, deleted)
           }
           this.forgetThumbs(d.name)
-          if (deleteMemos || !day.memo.trim()) {
-            await removeQuiet(ddir, DAY_FILE)
-          } else if (day.photos.length) {
-            await writeBlob(ddir, DAY_FILE, JSON.stringify({ ...day, photos: [], updatedAt: new Date().toISOString() }, null, 2))
-          }
+          // メモは絶対に消さない(メモの無い日だけ日記.json を片付ける)。写真の説明はメモの履歴に控える
+          if (day.photos.length) await this.updateDayNow(d.name, (x) => void (x.photos = []))
+          if (!day.memo.trim()) await removeQuiet(ddir, DAY_FILE)
           // 空になったフォルダだけ片付ける
           await removeQuiet(ddir, REDUCED_DIR)
           await removeQuiet(ddir, THUMB_DIR)

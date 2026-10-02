@@ -70,7 +70,16 @@ const ALL_EVENTS = 'allEvents'
 interface AllEvents {
   fetchedAt: string
   byCal: Record<string, CalendarEvent[]>
+  calendars?: CalendarListEntry[] // カレンダー一覧も一緒に控える(ブラウザのデータが消えても色・名前を出せるように)
 }
+
+/** 予定の控えの保存先(保存フォルダ)。ブラウザのデータとは別に、2か所に控える */
+export interface EventsBackupStore {
+  loadEventsBackup<T>(): Promise<T | undefined>
+  saveEventsBackup(data: unknown): Promise<void>
+}
+
+const totalCount = (d: AllEvents) => Object.values(d.byCal).reduce((n, l) => n + l.length, 0)
 
 // 端末に残す項目だけにする(容量を抑える)
 const slim = (e: CalendarEvent): CalendarEvent => ({
@@ -87,19 +96,40 @@ const slim = (e: CalendarEvent): CalendarEvent => ({
  * 全期間の予定。ログインしたときに Google から全部取り直して端末に保存し、
  * ログインしていないときも(次にログインするまで)その控えを表示する
  */
-export function useAllEvents(token: AccessToken | null, calendars: CalendarListEntry[], hidden: string[], onAuthError: (e: unknown) => boolean) {
+export function useAllEvents(
+  store: EventsBackupStore,
+  token: AccessToken | null,
+  googleCalendars: CalendarListEntry[],
+  hidden: string[],
+  onAuthError: (e: unknown) => boolean,
+) {
   const [data, setData] = useState<AllEvents | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
-  const calIds = calendars.map((c) => c.id).join('\n')
+  const [source, setSource] = useState<'browser' | 'folder' | 'google' | ''>('')
+  const calendars = googleCalendars.length ? googleCalendars : (data?.calendars ?? [])
+  const calIds = googleCalendars.map((c) => c.id).join('\n')
+
+  // 起動時: ブラウザの控えと保存フォルダの控えのうち、新しいほうを使う。
+  // ブラウザの控えが無い・古いときは保存フォルダから戻し、片方しか無いときはもう片方にも写す
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const [b, f] = await Promise.all([idbGet<AllEvents>(ALL_EVENTS), store.loadEventsBackup<AllEvents>().catch(() => undefined)])
+      const pick = !b ? f : !f ? b : f.fetchedAt > b.fetchedAt ? f : b
+      if (!pick || !alive) return
+      setData((cur) => cur ?? pick)
+      setSource((s) => s || (pick === b ? 'browser' : 'folder'))
+      if (pick !== b) await idbSet(ALL_EVENTS, pick).catch(() => {})
+      if (!f && b && totalCount(b)) await store.saveEventsBackup(b).catch(() => {})
+    })()
+    return () => void (alive = false)
+  }, [store])
 
   useEffect(() => {
-    idbGet<AllEvents>(ALL_EVENTS).then((c) => c && setData((cur) => cur ?? c))
-  }, [])
-
-  useEffect(() => {
-    if (!token || !calendars.length) return
+    if (!token || !googleCalendars.length) return
+    const calendars = googleCalendars
     let alive = true
     setLoading(true)
     setError('')
@@ -117,12 +147,15 @@ export function useAllEvents(token: AccessToken | null, calendars: CalendarListE
         }),
       )
       // 読めなかったカレンダーは、前回の控えを残す
-      const prev = (await idbGet<AllEvents>(ALL_EVENTS))?.byCal ?? {}
+      const prev = (await idbGet<AllEvents>(ALL_EVENTS))?.byCal ?? (await store.loadEventsBackup<AllEvents>().catch(() => undefined))?.byCal ?? {}
       for (const c of calendars) if (!byCal[c.id] && prev[c.id]) byCal[c.id] = prev[c.id]
-      const fresh: AllEvents = { fetchedAt: new Date().toISOString(), byCal }
-      await idbSet(ALL_EVENTS, fresh)
+      const fresh: AllEvents = { fetchedAt: new Date().toISOString(), byCal, calendars }
+      // 2か所に控える(ブラウザ・保存フォルダ)。どちらかが失敗しても、もう片方は残す
+      const results = await Promise.allSettled([idbSet(ALL_EVENTS, fresh), totalCount(fresh) ? store.saveEventsBackup(fresh) : Promise.resolve()])
       if (!alive) return
       setData(fresh)
+      setSource('google')
+      if (results[1].status === 'rejected') setError(`予定の控えを保存フォルダに保存できませんでした: ${String(results[1].reason)}`)
       if (failed.length) setError(`次のカレンダーを読み込めませんでした(前回の控えを表示しています): ${failed.join('、')}`)
     })()
       .catch((e) => alive && !onAuthError(e) && setError(e instanceof Error ? e.message : String(e)))
@@ -147,5 +180,5 @@ export function useAllEvents(token: AccessToken | null, calendars: CalendarListE
 
   const byDay = useMemo(() => indexByDay(events), [events])
 
-  return { byDay, count: events.length, loading, error, fetchedAt: data?.fetchedAt, reload: () => setReloadKey((k) => k + 1) }
+  return { byDay, count: events.length, calendars, source, loading, error, fetchedAt: data?.fetchedAt, reload: () => setReloadKey((k) => k + 1) }
 }

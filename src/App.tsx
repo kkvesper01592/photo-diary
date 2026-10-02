@@ -117,7 +117,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
   const google = useGoogle()
   const newer = useNewerVersion()
   const grid = monthGrid(cursor.y, cursor.m)
-  const allEv = useAllEvents(google.token, google.calendars, settings.hiddenCalendarIds, google.onAuthError)
+  const allEv = useAllEvents(lib, google.token, google.calendars, settings.hiddenCalendarIds, google.onAuthError)
 
   const bump = useCallback(() => setRev((r) => r + 1), [])
 
@@ -252,7 +252,8 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
         !google.token &&
         allEv.fetchedAt && (
           <div className="banner small-text">
-            前回ログインしたときの予定({new Date(allEv.fetchedAt).toLocaleString('ja-JP')} 時点・{allEv.count.toLocaleString()} 件)を表示しています。最新にするには Google にログインしてください。
+            前回ログインしたときの予定({new Date(allEv.fetchedAt).toLocaleString('ja-JP')} 時点・{allEv.count.toLocaleString()} 件
+            {allEv.source === 'folder' && '・保存フォルダの控えから復元'})を表示しています。最新にするには Google にログインしてください。
           </div>
         )
       )}
@@ -312,7 +313,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
           lib={lib}
           settings={settings}
           onChange={saveSettings}
-          calendars={google.calendars}
+          calendars={allEv.calendars}
           loggedIn={!!google.token}
           onLogin={() => void google.login()}
           onLogout={() => void google.logout()}

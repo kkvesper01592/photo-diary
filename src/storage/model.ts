@@ -17,6 +17,12 @@ export const INDEX_FILE = '_索引.json'
 export const DAY_FILE = '日記.json'
 export const REDUCED_DIR = '縮小版'
 export const THUMB_DIR = 'サムネイル'
+// アプリのデータの控え(予定の控え・メモの履歴)。写真の削除などの操作では一切触らない
+export const DATA_DIR = '_写真日記のデータ'
+export const EVENTS_FILE = '予定の控え.json'
+export const EVENTS_PREV_FILE = '予定の控え_前回.json'
+export const MEMO_BACKUP_DIR = 'メモの履歴'
+export const MEMO_HISTORY_MAX = 1000
 
 export interface Gps {
   lat: number
@@ -81,3 +87,18 @@ export function summarize(d: DayData): DaySummary | undefined {
   const sorted = [...d.photos].sort((a, b) => a.takenAt.localeCompare(b.takenAt))
   return { count: d.photos.length, cover: sorted[0]?.file, memo: d.memo.trim() ? d.memo.trim().slice(0, 200) : undefined }
 }
+
+/** メモ・写真の説明の履歴(1日1ファイル)。保存のたびに追記し、消さない */
+export interface MemoVersion {
+  savedAt: string
+  memo: string
+  captions: Record<string, string> // ファイル名 → 説明(空でないものだけ)
+}
+
+export interface MemoHistory {
+  version: 1
+  date: string
+  versions: MemoVersion[] // 古い順
+}
+
+export const captionsOf = (d: DayData) => Object.fromEntries(d.photos.filter((p) => p.caption.trim()).map((p) => [p.file, p.caption]))
