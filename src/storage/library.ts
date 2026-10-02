@@ -1,4 +1,5 @@
 import { getDir, getFile, listEntries, readText, writeBlob } from './fs'
+import { idbGet, idbSet } from '../lib/idb'
 import {
   DATA_DIR,
   DAY_FILE,
@@ -14,6 +15,8 @@ import {
   INDEX_FILE,
   REDUCED_DIR,
   SETTINGS_FILE,
+  SETTINGS_HISTORY_DIR,
+  SETTINGS_HISTORY_MAX,
   THUMB_DIR,
   derivedName,
   emptyDay,
@@ -52,11 +55,13 @@ function parseJson<T>(text: string | undefined, name: string): T | undefined {
 }
 
 const yearOf = (date: string) => date.slice(0, 4)
+const SETTINGS_IDB_KEY = 'settings'
 
 /** 保存フォルダの読み書きをまとめたもの */
 export class Library {
   private urls = new Map<string, string>()
   private queue: Promise<unknown> = Promise.resolve()
+  private settingsHistoryChecked = false
 
   /** 書き込みを1つずつ順番に行う(同じファイルへの同時書き込みで内容が混ざらないように) */
   private serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -72,13 +77,96 @@ export class Library {
   }
 
   // ---- 設定 ----
-  async loadSettings(): Promise<Settings> {
-    const s = parseJson<Partial<Settings>>(await readText(this.root, SETTINGS_FILE), SETTINGS_FILE)
-    return { ...DEFAULT_SETTINGS, ...s }
+  /**
+   * 設定は3か所に控える: 保存フォルダの 写真日記_設定.json(本体)・設定の履歴(変える前の設定を日時付きで)・ブラウザ。
+   * 本体が無い・壊れているときは、設定の履歴の新しいもの → ブラウザの控え の順に探して戻す。
+   * restored: どこから戻したか(戻していなければ undefined)
+   */
+  async loadSettings(): Promise<Settings & { restored?: string }> {
+    let main: Partial<Settings> | undefined
+    try {
+      main = parseJson<Partial<Settings>>(await readText(this.root, SETTINGS_FILE), SETTINGS_FILE)
+    } catch {
+      main = undefined // 壊れていたら控えから戻す
+    }
+    if (main) {
+      const s = { ...DEFAULT_SETTINGS, ...main }
+      await idbSet(SETTINGS_IDB_KEY, s).catch(() => {})
+      // 控えがまだ1つも無ければ、今の設定を控える(この機能より前から使っている場合)
+      if (!this.settingsHistoryChecked) {
+        this.settingsHistoryChecked = true
+        if (!(await this.listSettingsHistory()).length) await this.serial(() => this.addSettingsHistory(JSON.stringify(s, null, 2))).catch(() => {})
+      }
+      return s
+    }
+    const fromHistory = await this.latestSettingsHistory()
+    const fromBrowser = await idbGet<Settings>(SETTINGS_IDB_KEY)
+    const pick = fromHistory ?? fromBrowser
+    if (!pick) return { ...DEFAULT_SETTINGS }
+    const s = { ...DEFAULT_SETTINGS, ...pick }
+    await this.serial(() => writeBlob(this.root, SETTINGS_FILE, JSON.stringify(s, null, 2))).catch(() => {})
+    return { ...s, restored: fromHistory ? '保存フォルダの設定の履歴' : 'ブラウザの控え' }
   }
 
   saveSettings(s: Settings) {
-    return this.serial(() => writeBlob(this.root, SETTINGS_FILE, JSON.stringify(s, null, 2)))
+    return this.serial(async () => {
+      const { restored: _r, ...clean } = s as Settings & { restored?: string }
+      const text = JSON.stringify(clean, null, 2)
+      // 履歴がまだ無ければ、今までの設定を最初の1件として控える
+      const cur = await readText(this.root, SETTINGS_FILE).catch(() => undefined)
+      if (cur && cur.trim() !== text && !(await this.listSettingsHistory()).length) await this.addSettingsHistory(cur, new Date(Date.now() - 1000))
+      await writeBlob(this.root, SETTINGS_FILE, text)
+      // 保存した設定を履歴にも控える(本体が消えても、いちばん新しい設定を戻せるように)
+      await this.addSettingsHistory(text)
+      await idbSet(SETTINGS_IDB_KEY, clean).catch(() => {})
+    })
+  }
+
+  private async addSettingsHistory(text: string, d = new Date()) {
+    const dir = (await getDir(this.root, [DATA_DIR, SETTINGS_HISTORY_DIR], true))!
+    const p = (n: number) => String(n).padStart(2, '0')
+    const name = `設定_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.json`
+    await writeBlob(dir, name, text)
+    // 古いものから整理(最新 SETTINGS_HISTORY_MAX 件を残す)
+    const files = (await listEntries(dir)).filter((e) => e.kind === 'file' && /^設定_\d{8}_\d{6}\.json$/.test(e.name)).map((e) => e.name).sort()
+    for (const old of files.slice(0, Math.max(0, files.length - SETTINGS_HISTORY_MAX))) await dir.removeEntry(old).catch(() => {})
+  }
+
+  /** 設定の履歴(新しい順)。name は 設定_YYYYMMDD_HHMMSS.json */
+  async listSettingsHistory(): Promise<{ name: string; label: string }[]> {
+    const dir = await getDir(this.root, [DATA_DIR, SETTINGS_HISTORY_DIR], false)
+    if (!dir) return []
+    return (await listEntries(dir))
+      .filter((e) => e.kind === 'file' && /^設定_\d{8}_\d{6}\.json$/.test(e.name))
+      .map((e) => e.name)
+      .sort()
+      .reverse()
+      .map((name) => {
+        const m = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(name)!
+        return { name, label: `${m[1]}/${Number(m[2])}/${Number(m[3])} ${m[4]}:${m[5]}:${m[6]} に保存した設定` }
+      })
+  }
+
+  async loadSettingsHistory(name: string): Promise<Settings> {
+    const dir = await getDir(this.root, [DATA_DIR, SETTINGS_HISTORY_DIR], false)
+    const v = dir && parseJson<Partial<Settings>>(await readText(dir, name), name)
+    if (!v) throw new Error('設定の履歴が見つかりません')
+    return { ...DEFAULT_SETTINGS, ...v }
+  }
+
+  private async latestSettingsHistory(): Promise<Partial<Settings> | undefined> {
+    const dir = await getDir(this.root, [DATA_DIR, SETTINGS_HISTORY_DIR], false)
+    if (!dir) return undefined
+    const files = (await listEntries(dir)).filter((e) => e.kind === 'file' && /^設定_\d{8}_\d{6}\.json$/.test(e.name)).map((e) => e.name).sort().reverse()
+    for (const f of files) {
+      try {
+        const v = parseJson<Partial<Settings>>(await readText(dir, f), f)
+        if (v) return v
+      } catch {
+        /* 壊れていたら次に古いもの */
+      }
+    }
+    return undefined
   }
 
   /** 初回: 取り込み用フォルダを用意する */

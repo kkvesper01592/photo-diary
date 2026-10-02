@@ -125,7 +125,10 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
   useEffect(() => {
     lib
       .loadSettings()
-      .then(setSettings)
+      .then(({ restored, ...s }) => {
+        setSettings(s)
+        if (restored) setSettingsRestored(restored)
+      })
       .catch((e) => setError(String(e)))
     scanInbox(lib)
       .then((s) => setInboxCount(s.files.length))
@@ -174,6 +177,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
   }
   const goToday = () => goDate(ymd(new Date()))
 
+  const [settingsRestored, setSettingsRestored] = useState('')
   const saveSettings = async (s: Settings) => {
     await lib.saveSettings(s)
     setSettings(s)
@@ -236,6 +240,14 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
       )}
 
       {error && <div className="banner warn-banner">{error}</div>}
+      {settingsRestored && (
+        <div className="banner">
+          設定ファイルが見つからなかったため、{settingsRestored}から設定を戻しました。
+          <button className="small ghost" onClick={() => setSettingsRestored('')}>
+            閉じる
+          </button>
+        </div>
+      )}
       {google.error && <div className="banner warn-banner">{google.error}</div>}
       {google.expired && (
         <div className="banner">

@@ -23,6 +23,8 @@ export const EVENTS_FILE = '予定の控え.json'
 export const EVENTS_PREV_FILE = '予定の控え_前回.json'
 export const MEMO_BACKUP_DIR = 'メモの履歴'
 export const MEMO_HISTORY_MAX = 1000
+export const SETTINGS_HISTORY_DIR = '設定の履歴' // 設定を保存するたびに、その設定を日時付きで控える
+export const SETTINGS_HISTORY_MAX = 50
 
 export interface Gps {
   lat: number

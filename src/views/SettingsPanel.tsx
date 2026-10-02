@@ -24,6 +24,31 @@ export default function SettingsPanel(p: Props) {
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [settingsHistory, setSettingsHistory] = useState<{ name: string; label: string }[] | null>(null)
+  const [historyPick, setHistoryPick] = useState('')
+
+  const openSettingsHistory = async () => {
+    setError('')
+    try {
+      const list = await lib.listSettingsHistory()
+      setSettingsHistory(list)
+      setHistoryPick(list[0]?.name ?? '')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const restoreSettings = async () => {
+    if (!historyPick) return
+    if (!window.confirm('選んだ時点の設定に戻しますか？(今の設定も履歴に残ります)')) return
+    try {
+      await p.onChange(await lib.loadSettingsHistory(historyPick))
+      setMsg('設定を戻しました')
+      setSettingsHistory(null)
+    } catch (e) {
+      setError(`設定を戻せませんでした: ${e instanceof Error ? e.message : e}`)
+    }
+  }
   // 写真をすべて削除
   const [delAll, setDelAll] = useState<{ photos: number; days: number } | null>(null)
   const [backedUp, setBackedUp] = useState(false)
@@ -182,6 +207,37 @@ export default function SettingsPanel(p: Props) {
           </button>
           <p className="muted small-text">フォルダを手で動かしたときや、月カレンダーに写真が出ないときに使います(写真やメモは変更しません)。</p>
           {msg && <p className="small-text">{msg}</p>}
+        </section>
+
+        <section className="set-sec">
+          <h3>設定の控え</h3>
+          <p className="muted small-text">
+            設定は、保存フォルダの「写真日記_設定.json」・設定を変えるたびの履歴(_写真日記のデータ\設定の履歴、最新50件)・この PC のブラウザの3か所に控えています。
+            設定ファイルが消えたときは、自動で控えから戻します。
+          </p>
+          {settingsHistory === null ? (
+            <button className="small ghost" onClick={() => void openSettingsHistory()}>
+              設定の履歴から戻す…
+            </button>
+          ) : settingsHistory.length === 0 ? (
+            <p className="small-text muted">まだ設定の履歴はありません</p>
+          ) : (
+            <div className="btns">
+              <select value={historyPick} onChange={(e) => setHistoryPick(e.target.value)}>
+                {settingsHistory.map((h) => (
+                  <option key={h.name} value={h.name}>
+                    {h.label}
+                  </option>
+                ))}
+              </select>
+              <button className="small" onClick={() => void restoreSettings()}>
+                この設定に戻す
+              </button>
+              <button className="small ghost" onClick={() => setSettingsHistory(null)}>
+                やめる
+              </button>
+            </div>
+          )}
         </section>
 
         <section className="set-sec">
