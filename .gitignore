@@ -10,3 +10,7 @@ dist/
 _取り込み/
 写真日記_設定.json
 *.zip
+
+# PC のフォルダの場所を含む手順書(公開しない)
+PCだけで使う手順.html
+manual.html
