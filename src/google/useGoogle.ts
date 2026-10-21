@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { requestAccessToken, revokeToken, type AccessToken } from './auth'
+import { desktopHasLogin, inDesktopApp } from '../desktop/host'
 import { AuthExpiredError, listAllExpanded, listCalendars, type CalendarEvent, type CalendarListEntry } from './calendarApi'
 import { SCOPE_CALENDAR_READONLY } from '../config'
 import { idbGet, idbSet } from '../lib/idb'
@@ -18,12 +19,14 @@ export function useGoogle() {
     idbGet<CalendarListEntry[]>('calendars').then((c) => c && setCalendars((cur) => (cur.length ? cur : c)))
   }, [])
 
-  const login = useCallback(async () => {
+  /** auto: 起動時などの自動ログイン(専用アプリ)。保存した合鍵だけでつなぎ、ブラウザの確認画面は開かない */
+  const login = useCallback(async (opts: { auto?: boolean } = {}) => {
     setError('')
     try {
-      let silent = false
+      let silent = !!opts.auto
       try {
-        silent = localStorage.getItem(LOGGED_IN) === '1'
+        // 専用アプリでは、合鍵があればそれでつなぎ、無いときだけ確認画面(普段のブラウザ)を開く
+        silent ||= !inDesktopApp && localStorage.getItem(LOGGED_IN) === '1'
       } catch {
         /* 保存できない環境では毎回確認画面 */
       }
@@ -53,14 +56,23 @@ export function useGoogle() {
     setToken(null)
   }, [token])
 
-  const onAuthError = useCallback((e: unknown) => {
-    if (e instanceof AuthExpiredError) {
-      setToken(null)
-      setExpired(true)
-      return true
-    }
-    return false
-  }, [])
+  const onAuthError = useCallback(
+    (e: unknown) => {
+      if (e instanceof AuthExpiredError) {
+        setToken(null)
+        setExpired(true)
+        if (desktopHasLogin()) void login({ auto: true }) // 専用アプリ: 有効期限(1時間)が切れたら自動でつなぎ直す
+        return true
+      }
+      return false
+    },
+    [login],
+  )
+
+  // 専用アプリ: ログインの合鍵が保存されていれば、起動したらすぐ自動でつなぐ(ボタン操作は要らない)
+  useEffect(() => {
+    if (desktopHasLogin()) void login({ auto: true })
+  }, [login])
 
   return { token, calendars, error, expired, login, logout, onAuthError }
 }

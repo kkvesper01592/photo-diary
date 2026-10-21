@@ -1,4 +1,5 @@
 import { GOOGLE_CLIENT_ID } from '../config'
+import { hostCall, inDesktopApp } from '../desktop/host'
 
 // Google Identity Services (GIS) の最小限の型
 interface TokenResponse {
@@ -61,6 +62,15 @@ export const hasScope = (token: AccessToken, scope: string) => token.scope.split
  * silent: 一度許可した後のログインし直し(有効期限の更新)。確認画面を出さず、ポップアップは自動で閉じる
  * (ブラウザの決まりで、ボタンを押した操作の中から呼ぶ必要がある) */
 export async function requestAccessToken(required: string, optional: string[] = [], opts: { silent?: boolean } = {}): Promise<AccessToken> {
+  if (useDesktopAuth()) {
+    // 専用アプリ: アプリ本体が保存した合鍵(3アプリで共有)でつなぐ。合鍵が無いときだけ、普段のブラウザで Google の確認画面を開く
+    const r = await hostCall<{ access_token: string; expires_in: number; scope: string }>('auth.token', {
+      scopes: [required, ...optional],
+      interactive: !opts.silent,
+    })
+    if (!r.scope.split(' ').includes(required)) throw new Error('カレンダーの閲覧が許可されませんでした。チェックを入れて再度ログインしてください')
+    return { value: r.access_token, expiresAt: Date.now() + r.expires_in * 1000, scope: r.scope }
+  }
   await loadGis()
   const oauth2 = window.google!.accounts.oauth2
   return new Promise((resolve, reject) => {
@@ -89,6 +99,10 @@ export async function requestAccessToken(required: string, optional: string[] = 
   })
 }
 
+/** 専用アプリの中か(開発用の ?demo で架空のログインを入れたときは、そちらを使う) */
+const useDesktopAuth = () => inDesktopApp && !window.google
+
 export function revokeToken(token: AccessToken): Promise<void> {
+  if (useDesktopAuth()) return hostCall<void>('auth.revoke')
   return new Promise((resolve) => window.google!.accounts.oauth2.revoke(token.value, () => resolve()))
 }
