@@ -29,3 +29,11 @@ export function monthGrid(year: number, month0: number): { start: Date; end: Dat
 
 /** 2026年9月29日(火) */
 export const jpDate = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${WEEKDAYS[d.getDay()]})`
+
+/** その日を含む週(日曜始まり)の7日 */
+export function weekOf(d: Date): Date[] {
+  const s = addDays(d, -d.getDay())
+  return Array.from({ length: 7 }, (_, i) => addDays(s, i))
+}
+
+export type ViewKind = 'year' | 'month' | 'week' | 'day'

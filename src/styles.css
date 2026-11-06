@@ -251,3 +251,84 @@ button.danger:hover:not(:disabled) { background: #a51f1f; }
 .history-memo { white-space: pre-wrap; font: inherit; font-size: 14px; margin: 4px 0; }
 .history-captions { margin: 0; padding-left: 18px; }
 .field-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }
+
+/* 表示の切り替え(年・月・週・日) */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { background: transparent; color: var(--text); border-radius: 0; padding: 4px 14px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent); color: #fff; }
+.layout.no-panel { grid-template-columns: minmax(0, 1fr); }
+
+/* 年表示 */
+.year { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .year { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .year { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .year { grid-template-columns: minmax(0, 1fr); } }
+.mini { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px; min-width: 0; }
+.mini-title { all: unset; cursor: pointer; font-weight: bold; padding: 0 4px; display: flex; align-items: baseline; gap: 8px; }
+.mini-title:hover { color: var(--accent); }
+.mini-count { font-weight: normal; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mini-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; margin-top: 4px; }
+.mini-wd { font-size: 10px; color: var(--muted); }
+.mini-wd.sun, .mini-day.sun { color: var(--sun); }
+.mini-wd.sat, .mini-day.sat { color: var(--sat); }
+.mini-day {
+  all: unset; box-sizing: border-box; cursor: pointer; position: relative; aspect-ratio: 1; border-radius: 4px; overflow: hidden;
+  display: flex; align-items: flex-start; justify-content: center; font-size: 12px; line-height: 1.2; padding-top: 2px;
+}
+.mini-day:hover { background: var(--selected); }
+.mini-day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mini-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mini-num { position: relative; padding: 0 3px; border-radius: 6px; }
+.mini-day.has-photo .mini-num { background: color-mix(in srgb, var(--card) 80%, transparent); }
+.mini-day.today .mini-num { background: var(--today); color: #fff; }
+.mini-day.has-photo:hover .mini-cover { filter: brightness(1.12); }
+.mini-dot { position: absolute; left: 50%; bottom: 2px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; box-shadow: 0 0 0 1px var(--card); }
+
+/* 週表示・1日表示(時間軸つき) */
+.timegrid { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; min-width: 0; }
+.tg-head, .tg-allday, .tg-inner { display: grid; }
+.tg-head { border-bottom: 1px solid var(--grid); }
+.tg-day {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 4px 2px; border-left: 1px solid var(--grid); min-width: 0;
+}
+.tg-day:hover { background: var(--selected); }
+.tg-day.selected { box-shadow: inset 0 -3px 0 var(--accent); background: var(--selected); }
+.tg-wd { font-size: 12px; color: var(--muted); }
+.tg-day.sun, .tg-day.sun .daynum, .tg-day.sun .tg-wd { color: var(--sun); }
+.tg-day.sat, .tg-day.sat .daynum, .tg-day.sat .tg-wd { color: var(--sat); }
+.tg-day.today .daynum { background: var(--today); color: #fff; }
+.tg-day .holiday { max-width: 100%; }
+.tg-day .badges { min-height: 16px; }
+.tg-allday { border-bottom: 1px solid var(--grid); min-height: 26px; }
+.tg-label { font-size: 11px; color: var(--muted); text-align: right; padding: 4px 6px 0 0; }
+.tg-allday-cell { display: flex; flex-direction: column; gap: 1px; padding: 2px; border-left: 1px solid var(--grid); min-width: 0; cursor: pointer; }
+.tg-allday-cell .chip { margin-top: 0; }
+.tg-body { height: calc(100vh - 130px); min-height: 400px; overflow-y: auto; }
+.tg-sticky { position: sticky; top: 0; z-index: 3; background: var(--card); }
+.tg-inner { position: relative; }
+.tg-hours { position: relative; }
+.tg-hour { position: absolute; right: 6px; transform: translateY(-50%); font-size: 11px; color: var(--muted); }
+.tg-col { position: relative; border-left: 1px solid var(--grid); min-width: 0; cursor: pointer; }
+.tg-col.selected { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+.tg-now { position: absolute; left: 0; right: 0; border-top: 2px solid var(--sun); z-index: 2; }
+/* 予定は左側、写真は右側の帯に置く */
+.tg-events { position: absolute; top: 0; bottom: 0; left: 0; right: 30px; }
+.tg-photos { position: absolute; top: 0; bottom: 0; right: 0; width: 30px; }
+.single-day .tg-events { right: 50%; }
+.single-day .tg-photos { width: 50%; border-left: 1px dashed var(--grid); }
+.tg-event {
+  position: absolute; box-sizing: border-box; overflow: hidden; padding: 1px 4px; border-radius: 4px; border-left: 3px solid;
+  background: color-mix(in srgb, var(--accent) 16%, var(--card)); font-size: 12px; line-height: 1.3; display: flex; flex-direction: column;
+}
+.tg-ev-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-ev-time { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.tg-slot { position: absolute; left: 2px; right: 2px; height: 24px; display: flex; align-items: center; gap: 2px; z-index: 1; }
+.tg-thumb { all: unset; box-sizing: border-box; cursor: pointer; width: 24px; height: 24px; flex: none; border-radius: 3px; overflow: hidden; background: var(--other); }
+.tg-thumb img, .tg-thumb .thumb-empty { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tg-thumb:hover { outline: 2px solid var(--accent); outline-offset: -1px; }
+.tg-thumb:focus-visible { outline: 2px solid var(--accent); }
+.tg-more { font-size: 10px; padding: 0 3px; border-radius: 6px; background: var(--card); color: var(--muted); white-space: nowrap; }
+.timegrid:not(.single-day) .tg-more { position: absolute; right: -2px; bottom: -4px; font-size: 9px; }

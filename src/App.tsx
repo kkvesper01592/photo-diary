@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { monthGrid, ymd } from './lib/dates'
+import { addDays, monthGrid, parseYmd, weekOf, ymd, WEEKDAYS, type ViewKind } from './lib/dates'
 import { useNewerVersion, versionDetail, versionLabel } from './lib/version'
 import { isLinked } from './lib/events'
 import { useAllEvents, useGoogle } from './google/useGoogle'
@@ -12,6 +12,32 @@ import ImportPanel from './views/ImportPanel'
 import MonthView from './views/MonthView'
 import PhotoViewer from './views/PhotoViewer'
 import SettingsPanel from './views/SettingsPanel'
+import TimeGridView from './views/TimeGridView'
+import YearView from './views/YearView'
+
+const VIEWS: { kind: ViewKind; label: string }[] = [
+  { kind: 'year', label: '年' },
+  { kind: 'month', label: '月' },
+  { kind: 'week', label: '週' },
+  { kind: 'day', label: '日' },
+]
+const VIEW_KEY = 'photodiary.view'
+function loadView(): ViewKind {
+  try {
+    const v = localStorage.getItem(VIEW_KEY)
+    if (VIEWS.some((x) => x.kind === v)) return v as ViewKind
+  } catch {
+    /* 読めなければ月表示 */
+  }
+  return 'month'
+}
+function saveView(v: ViewKind) {
+  try {
+    localStorage.setItem(VIEW_KEY, v)
+  } catch {
+    /* 覚えられなくても表示には影響しない */
+  }
+}
 
 type Gate =
   | { kind: 'loading' }
@@ -104,8 +130,11 @@ export default function App() {
 
 function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => void }) {
   const today = new Date()
+  const [view, setView] = useState<ViewKind>(loadView)
+  // 年・月表示で見ている月(週・日表示は選んだ日 selected が基準)
   const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() })
   const [selected, setSelected] = useState(ymd(today))
+  const [dayData, setDayData] = useState<Record<string, DayData>>({})
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [indexes, setIndexes] = useState<Record<string, YearIndex>>({})
   const [rev, setRev] = useState(0)
@@ -116,7 +145,16 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
 
   const google = useGoogle()
   const newer = useNewerVersion()
-  const grid = monthGrid(cursor.y, cursor.m)
+  const selDate = parseYmd(selected)
+  const weekDates = weekOf(selDate)
+  // 表示中の期間(索引を読む年を決めるため)
+  let range: { start: Date; end: Date }
+  if (view === 'year') range = { start: new Date(cursor.y, 0, 1), end: new Date(cursor.y, 11, 31) }
+  else if (view === 'month') {
+    const g = monthGrid(cursor.y, cursor.m)
+    range = { start: g.start, end: addDays(g.end, -1) }
+  } else if (view === 'week') range = { start: weekDates[0], end: weekDates[6] }
+  else range = { start: selDate, end: selDate }
   const allEv = useAllEvents(lib, google.token, google.calendars, settings.hiddenCalendarIds, google.onAuthError)
 
   const bump = useCallback(() => setRev((r) => r + 1), [])
@@ -135,8 +173,8 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
       .catch(() => {})
   }, [lib, rev])
 
-  // 表示中の月にかかる年の索引
-  const years = [...new Set([grid.start.getFullYear(), cursor.y, grid.end.getFullYear()])]
+  // 表示中の期間にかかる年の索引
+  const years = [...new Set([range.start.getFullYear(), range.end.getFullYear()])]
   const yearsKey = years.join(',')
   useEffect(() => {
     let alive = true
@@ -152,6 +190,18 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
   }, [lib, yearsKey, rev])
 
   const days = useMemo(() => Object.assign({}, ...Object.values(indexes).map((i) => i.days)) as Record<string, DaySummary>, [indexes])
+
+  // 週・日表示: 写真のある日の中身を読む(撮影時刻の位置に写真を並べるため)
+  const shownDates = view === 'week' ? weekDates.map(ymd) : view === 'day' ? [selected] : []
+  const photoDatesKey = shownDates.filter((k) => days[k]?.count).join(',')
+  useEffect(() => {
+    let alive = true
+    const keys = photoDatesKey ? photoDatesKey.split(',') : []
+    Promise.all(keys.map(async (k) => [k, await lib.loadDay(k)] as const))
+      .then((list) => alive && setDayData(Object.fromEntries(list)))
+      .catch(() => {})
+    return () => void (alive = false)
+  }, [lib, photoDatesKey, rev])
 
   // ほかの PC での変更を拾うため、画面に戻ったら読み直す(写真を見ている間は除く)
   const lastFocus = useRef(0)
@@ -169,7 +219,39 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
     }
   }, [bump])
 
-  const move = (n: number) => setCursor(({ y, m }) => ({ y: new Date(y, m + n, 1).getFullYear(), m: new Date(y, m + n, 1).getMonth() }))
+  const changeView = (v: ViewKind, monthOf = selDate) => {
+    setView(v)
+    saveView(v)
+    // 年・月表示に切り替えたら、選んでいる日の月を出す
+    if (v === 'year' || v === 'month') setCursor({ y: monthOf.getFullYear(), m: monthOf.getMonth() })
+  }
+  const move = (n: number) => {
+    if (view === 'week' || view === 'day') {
+      const d = addDays(selDate, n * (view === 'week' ? 7 : 1))
+      setSelected(ymd(d))
+      setCursor({ y: d.getFullYear(), m: d.getMonth() })
+      return
+    }
+    setCursor(({ y, m }) => {
+      const d = view === 'year' ? new Date(y + n, m, 1) : new Date(y, m + n, 1)
+      return { y: d.getFullYear(), m: d.getMonth() }
+    })
+  }
+  const showDay = (date: string) => {
+    setSelected(date)
+    changeView('day', parseYmd(date))
+  }
+  const ymdJp = (d: Date, withYear = true, withMonth = true) =>
+    `${withYear ? `${d.getFullYear()}年` : ''}${withMonth ? `${d.getMonth() + 1}月` : ''}${d.getDate()}日`
+  let title: string
+  if (view === 'year') title = `${cursor.y}年`
+  else if (view === 'month') title = `${cursor.y}年${cursor.m + 1}月`
+  else if (view === 'week') {
+    const [s, e] = [weekDates[0], weekDates[6]]
+    const sameYear = s.getFullYear() === e.getFullYear()
+    title = `${ymdJp(s)}〜${ymdJp(e, !sameYear, !sameYear || s.getMonth() !== e.getMonth())}`
+  } else title = `${ymdJp(selDate)}(${WEEKDAYS[selDate.getDay()]})`
+  const unit = view === 'year' ? '年' : view === 'month' ? '月' : view === 'week' ? '週' : '日'
   const goDate = (date: string) => {
     const [y, m] = date.split('-').map(Number)
     setCursor({ y, m: m - 1 })
@@ -190,18 +272,23 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
       <header className="topbar">
         <span className="brand">📷 写真日記</span>
         <div className="nav">
-          <button className="icon" onClick={() => move(-1)} aria-label="前の月">
+          <button className="icon" onClick={() => move(-1)} aria-label={`前の${unit}`}>
             ‹
           </button>
-          <span className="title">
-            {cursor.y}年{cursor.m + 1}月
-          </span>
-          <button className="icon" onClick={() => move(1)} aria-label="次の月">
+          <span className="title">{title}</span>
+          <button className="icon" onClick={() => move(1)} aria-label={`次の${unit}`}>
             ›
           </button>
           <button className="small ghost" onClick={goToday}>
             今日
           </button>
+        </div>
+        <div className="seg" role="tablist" aria-label="表示の切り替え">
+          {VIEWS.map((v) => (
+            <button key={v.kind} type="button" role="tab" aria-selected={view === v.kind} className={view === v.kind ? 'on' : ''} onClick={() => changeView(v.kind)}>
+              {v.label}
+            </button>
+          ))}
         </div>
         <div className="menu">
           <button className="small" onClick={() => setModal('import')}>
@@ -270,8 +357,32 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
         )
       )}
 
-      <main className="layout">
-        <MonthView lib={lib} year={cursor.y} month0={cursor.m} days={days} byDay={allEv.byDay} selected={selected} onSelect={setSelected} />
+      <main className={`layout ${view === 'year' ? 'no-panel' : ''}`}>
+        {view === 'year' ? (
+          <YearView
+            lib={lib}
+            year={cursor.y}
+            days={days}
+            byDay={allEv.byDay}
+            onPickDay={showDay}
+            onPickMonth={(m) => changeView('month', new Date(cursor.y, m, 1))}
+          />
+        ) : view === 'month' ? (
+          <MonthView lib={lib} year={cursor.y} month0={cursor.m} days={days} byDay={allEv.byDay} selected={selected} onSelect={setSelected} />
+        ) : (
+          <TimeGridView
+            lib={lib}
+            dates={view === 'week' ? weekDates : [selDate]}
+            byDay={allEv.byDay}
+            days={days}
+            dayData={dayData}
+            selected={selected}
+            onSelect={setSelected}
+            onPickDay={view === 'week' ? showDay : undefined}
+            onOpenPhoto={(day, file) => setViewer({ day, file, files: [...day.photos].sort((a, b) => a.takenAt.localeCompare(b.takenAt)).map((p) => p.file) })}
+          />
+        )}
+        {view !== 'year' && (
         <DayPanel
           lib={lib}
           date={selected}
@@ -284,6 +395,7 @@ function Main({ lib, onChangeFolder }: { lib: Library; onChangeFolder: () => voi
             setViewer({ day, file, files: list.map((p) => p.file) })
           }}
         />
+        )}
       </main>
 
       {viewer && (
